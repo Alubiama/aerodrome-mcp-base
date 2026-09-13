@@ -1,0 +1,73 @@
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import { getAddress, isAddress, type Address } from "viem";
+import * as z from "zod/v4";
+import type { AppConfig } from "./types.js";
+const ZERO = "0x0000000000000000000000000000000000000000" as const;
+export const configSchema = z.strictObject({
+ walletAddress: z.string().refine(value => isAddress(value) && value.toLowerCase() !== ZERO),
+ veNftTokenIds: z.array(z.string().regex(/^\d{1,78}$/).refine(value => BigInt(value) > 0n && BigInt(value) < (1n << 256n))).min(1).max(16)
+   .refine(values => new Set(values.map(value => BigInt(value).toString())).size === values.length),
+ gaugeAddresses: z.array(z.string().refine(value => isAddress(value) && value.toLowerCase() !== ZERO)).max(200).default([])
+});
+export function loadConfig(): AppConfig {
+ const filename = fileURLToPath(new URL("../config.json", import.meta.url));
+ if (fs.statSync(filename).size > 64000) throw new Error("Configuration too large.");
+ const input = configSchema.parse(JSON.parse(fs.readFileSync(filename, "utf8")));
+ return { ...input, baseRpcUrl: "https://mainnet.base.org",
+ contracts: { voter: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5", router: "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43", defaultFactory: "0x420DD381b31aEf6683db6B902084cB0FFECe40Da" },
+ tokens: { USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" } };
+}
+export function zeroAddress(): Address { return ZERO; }
+export function normalizeAddress(value: string, label = "address"): Address {
+  if (!isAddress(value)) throw new Error(`${label} is not a valid address: ${value}`);
+  return getAddress(value);
+}
+
+export function walletAddress(cfg: AppConfig): Address {
+  return normalizeAddress(cfg.walletAddress, "walletAddress");
+}
+
+export function voterAddress(cfg: AppConfig): Address {
+  return normalizeAddress(cfg.contracts.voter, "contracts.voter");
+}
+
+export function routerAddress(cfg: AppConfig): Address {
+  return normalizeAddress(cfg.contracts.router, "contracts.router");
+}
+
+export function defaultFactoryAddress(cfg: AppConfig): Address {
+  return normalizeAddress(cfg.contracts.defaultFactory, "contracts.defaultFactory");
+}
+
+export function uniqAddresses(addresses: Address[]): Address[] {
+  const seen = new Set<string>();
+  const out: Address[] = [];
+  for (const address of addresses) {
+    const normalized = getAddress(address);
+    const key = normalized.toLowerCase();
+    if (normalized === ZERO) continue;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(normalized);
+    }
+  }
+  return out;
+}
+
+export function uniqBigInts(values: bigint[]): bigint[] {
+  const seen = new Set<string>();
+  const out: bigint[] = [];
+  for (const value of values) {
+    const key = value.toString();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(value);
+    }
+  }
+  return out;
+}
+
+export function veTokenIds(cfg: AppConfig): bigint[] {
+  return uniqBigInts((cfg.veNftTokenIds ?? []).map((x) => BigInt(x)));
+}
