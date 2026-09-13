@@ -6,7 +6,7 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.2.0**. License: MIT.
+Version: **0.2.1**. License: MIT.
 
 ## Quick start
 
@@ -69,13 +69,13 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 | `aerodrome_protocol_status` | Official contract identity, block, epoch and protocol weights |
 | `aerodrome_voting_position` | Configured or supplied veNFT voting positions |
 | `aerodrome_wallet_rewards` | Current-vote reward scope and explicitly configured LP gauges |
-| `aerodrome_wallet_overview` | Address-first balances, automatic veNFT discovery, locks, voting, rewards and a Russian brief |
+| `aerodrome_wallet_overview` | Address-first balances, automatic veNFT discovery, locks, voting, rewards and an English brief |
 | `aerodrome_wallet_snapshot` | All wallet sections at one block with a final block-hash recheck |
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
 | `aerodrome_wallet_changes` | Capture with a UUID `requestId`; retry the same ID to recover the same report |
 | `aerodrome_wallet_report` | Retrieve a saved report by `reportId`, without RPC or baseline changes |
 
-## One-address overview (0.2.0)
+## One-address overview
 
 ```json
 {"name":"aerodrome_wallet_overview","arguments":{"wallet":"0x0000000000000000000000000000000000000002"}}
@@ -88,13 +88,17 @@ Use your own public address instead of the synthetic example. No manual veNFT ID
 - Current voting power and epoch state. The normal voting window alone does not establish transaction eligibility or success.
 - Current-vote rewards and up to 16 explicitly supplied `gauges`. Configured gauges are inherited only for the same configured wallet. LP principal valuation, historical rewards, rebases and managed rewards are not included.
 
-`summaryRu` gives a Russian brief; structured values retain addresses, source links, raw amounts and the common observed block. Missing values are null. Failed sections leave independently verified sections available; a changed block hash rejects the whole observation. Managed positions have `UNSUPPORTED_MANAGED` and null personal principal: pooled balances must not be attributed to the wallet owner. No aggregate net worth is calculated.
+`summary` gives an English brief; structured values retain addresses, source links, raw amounts and the common observed block. Missing values are null. Failed sections leave independently verified sections available; a changed block hash rejects the whole observation. Managed positions have `UNSUPPORTED_MANAGED` and null personal principal: pooled balances must not be attributed to the wallet owner. No aggregate net worth is calculated.
 
 `decimalsSource` distinguishes on-chain/canonical units from assumed or unknown units. New reward reads set `amountFormatted=null` if decimals are assumed; the raw amount remains available. Token labels are untrusted display data.
 
-The overview is a fresh read and does not update local history. `wallet_changes` still compares configured veNFT/current-reward scope; it does not yet track liquid-balance or lock-principal history. New reports include `findings`: Russian explanations with codes, block interval and source links. They describe observations, not inferred deposits, sales or claimed income. Old reports remain retrievable and may have no findings or unit provenance.
+The overview is a fresh read and does not update local history. `wallet_changes` still compares configured veNFT/current-reward scope; it does not yet track liquid-balance or lock-principal history. New reports include `findings`: English explanations with codes, block interval and source links. They describe observations, not inferred deposits, sales or claimed income. Old reports remain retrievable and may have no findings or unit provenance.
 
 Protocol basis: the official [VotingEscrow implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/VotingEscrow.sol) and [interface](https://github.com/aerodrome-finance/contracts/blob/main/contracts/interfaces/IVotingEscrow.sol) define owner enumeration, lock tuples and managed escrow types. Runtime reads are pinned to a single Base block and rechecked; these source references are not a substitute for RPC verification.
+
+### Upgrading from 0.2.0
+
+Use `summary` instead of `summaryRu`, and `findings[].message` instead of `findings[].messageRu`. All generated prose is English. Historical report findings are rendered in English from their stored structured evidence; report IDs, observations and raw changes remain unchanged. Retrieval does not rewrite the stored file or make RPC calls.
 
 ## Read the result correctly
 

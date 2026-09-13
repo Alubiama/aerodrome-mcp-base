@@ -17,8 +17,8 @@ export async function testWalletOverview() {
   assert.equal(overview.liquidBalances[0].amountFormatted, "1.25");
   assert.equal(overview.liquidBalances.find(row => row.symbol === "USDC")?.amountFormatted, "12.5");
   assert.equal(overview.rewards?.gaugeRewards[0].amountFormatted, "2.5");
-  assert.ok(overview.summaryRu.some(line => line.includes("сила голоса 20")));
-  assert.ok(overview.summaryRu.some(line => line.includes("Награда") && line.includes("2.5")));
+  assert.ok(overview.summary.some(line => line.includes("voting power 20")));
+  assert.ok(overview.summary.some(line => line.includes("Reward") && line.includes("2.5")));
   assert.ok(fixture.calls.includes("ownerToNFTokenIdList"));
   assert.equal("netWorth" in overview, false);
   const empty = overviewFixture("empty");

@@ -35,7 +35,7 @@ export const walletOverviewSchema = z.strictObject({
   protocol: walletSnapshotSchema.shape.protocol,
   voting: walletSnapshotSchema.shape.voting.nullable(),
   rewards: walletSnapshotSchema.shape.rewards.nullable(),
-  summaryRu: z.array(z.string()), warnings: z.array(z.string()),
+  summary: z.array(z.string()), warnings: z.array(z.string()),
   coverage: z.strictObject({ balances: z.string(), positions: z.string(), rewards: z.string(), voting: z.string(), totals: z.string(), consistency: z.string() })
 });
 const source = (contract: string, block: string) => `https://basescan.org/address/${contract}?block=${block}`;
@@ -146,20 +146,30 @@ export async function getWalletOverview(input: WalletOverviewInput = {}, runtime
   const finalBlock = await client.getBlock({ blockNumber: obs.rawBlockNumber });
   runtime.signal?.throwIfAborted();
   if (finalBlock.number !== obs.rawBlockNumber || finalBlock.hash !== obs.value.blockHash) throw new Error("Snapshot block changed during reads; retry.");
-  const summaryRu = [
-    `Обзор на блоке ${block}. Свободные средства, блокировки, сила голоса и награды показаны отдельно.`,
-    ...liquidBalances.map(row => `${row.token ? `${row.symbol} (${row.token})` : "ETH"}: ${row.amountRaw === null ? "баланс недоступен" : row.amountFormatted ?? `${row.amountRaw} минимальных единиц; точность неизвестна`}.`),
-    `veNFT: найдено ${tokenIds.length}${ownedCount === null ? "; общее количество неизвестно" : ` из ${ownedCount}`}.`,
-    ...locks.map(row => `veNFT #${row.tokenId}: ${row.status !== "VERIFIED_POINT_IN_TIME" ? "личная заблокированная сумма не определена" : `${row.principalFormatted ?? `${row.principalRaw} минимальных единиц`} токена ${escrowToken}; ${row.permanent ? "постоянная блокировка" : `окончание ${row.unlockAt}`}`}.`),
-    `Обычное окно голосования: ${protocol.epoch.normalVotingOpen ? "открыто" : "закрыто"}. Это не полная проверка права конкретной позиции на голосование.`,
-    ...(voting?.positions.map(row => `veNFT #${row.tokenId}: сила голоса ${formatUnits(BigInt(row.currentVotingPowerRaw), 18)}; ${row.votedThisEpoch ? "голос отмечен в текущей эпохе" : "голос в текущей эпохе не отмечен"}.`) ?? ["Данные о силе голоса недоступны."]),
-    ...(rewards ? [...rewards.votingRewards, ...rewards.gaugeRewards].filter(row => BigInt(row.amountRaw) > 0n).map(row => `Награда ${row.symbol} (${row.token}): ${["ONCHAIN", "CANONICAL"].includes(row.decimalsSource) ? row.amountFormatted : `${row.amountRaw} минимальных единиц; точность неизвестна`}; источник ${"rewardContract" in row ? row.rewardContract : row.gauge}.`) : ["Награды недоступны."]),
-    ...(partial ? ["Часть данных недоступна или выходит за охват проверки; это не нулевые балансы."] : []),
-    "Награды проверены только по текущим голосам и указанным gauges. Исторические награды, стоимость LP-позиций и итоговая стоимость кошелька не рассчитаны."
-  ];
-  return walletOverviewSchema.parse({ status: partial ? "PARTIAL_BOUNDED_SCOPE" : "VERIFIED_BOUNDED_SCOPE", readOnly: true, chainId: 8453, wallet, observation: obs.value,
-    liquidBalances, discovery: { status: discoveryStatus, ownedCount: ownedCount?.toString() ?? null, tokenIds, limit: 16 }, locks, protocol, voting, rewards, summaryRu,
+
+  const result = walletOverviewSchema.parse({ status: partial ? "PARTIAL_BOUNDED_SCOPE" : "VERIFIED_BOUNDED_SCOPE", readOnly: true, chainId: 8453, wallet, observation: obs.value,
+    liquidBalances, discovery: { status: discoveryStatus, ownedCount: ownedCount?.toString() ?? null, tokenIds, limit: 16 }, locks, protocol, voting, rewards, summary: [],
     warnings: [...warnings, ...(voting?.warnings ?? []), ...(rewards?.warnings ?? [])],
     coverage: { balances: "ETH, escrow token, configured USDC and explicitly requested ERC-20s; not every wallet asset", positions: "first 16 verified entries of the official escrow owner list; managed principal is unknown", rewards: "current-vote rewards and at most 16 explicitly selected gauges; historical rewards, rebases and managed rewards excluded", voting: "normal epoch window and observed voting state; eligibility, delegation and transaction success not established", totals: "no aggregate net worth; liquid balances, locked principal, voting power and rewards must not be added together", consistency: "one pinned Base block, final hash recheck; RPC trust required" }
   });
+  result.summary = formatOverviewSummary(result);
+  return result;
+}
+
+export function formatOverviewSummary(data: z.infer<typeof walletOverviewSchema>): string[] {
+  const { liquidBalances, locks, protocol, voting, rewards } = data;
+  const block = data.observation.blockNumber;
+  const { tokenIds, ownedCount } = data.discovery;
+  const partial = data.status === "PARTIAL_BOUNDED_SCOPE";
+  return [
+    `Overview at block ${block}. Liquid funds, locks, voting power and rewards are reported separately.`,
+    ...liquidBalances.map(row => `${row.token ? `${row.symbol} (${row.token})` : "ETH"}: ${row.amountRaw === null ? "balance unavailable" : row.amountFormatted ?? `${row.amountRaw} raw units; decimals unknown`}.`),
+    `veNFTs discovered: ${tokenIds.length}${ownedCount === null ? "; total count unknown" : ` of ${ownedCount}`}.`,
+    ...locks.map(row => `veNFT #${row.tokenId}: ${row.status !== "VERIFIED_POINT_IN_TIME" ? "personal locked principal is unknown" : `${row.principalFormatted ?? `${row.principalRaw} raw units`} of token ${row.token ?? "unknown"}; ${row.permanent ? "permanent lock" : `unlock time ${row.unlockAt}`}`}.`),
+    `Normal voting window: ${protocol.epoch.normalVotingOpen ? "open" : "closed"}. This is not a complete check of a position's voting eligibility.`,
+    ...(voting?.positions.map(row => `veNFT #${row.tokenId}: voting power ${formatUnits(BigInt(row.currentVotingPowerRaw), 18)}; ${row.votedThisEpoch ? "vote recorded in the current epoch" : "no vote recorded in the current epoch"}.`) ?? ["Voting-power evidence is unavailable."]),
+    ...(rewards ? [...rewards.votingRewards, ...rewards.gaugeRewards].filter(row => BigInt(row.amountRaw) > 0n).map(row => `Reward ${row.symbol} (${row.token}): ${["ONCHAIN", "CANONICAL"].includes(row.decimalsSource) ? row.amountFormatted : `${row.amountRaw} raw units; decimals unknown`}; source ${"rewardContract" in row ? row.rewardContract : row.gauge}.`) : ["Rewards are unavailable."]),
+    ...(partial ? ["Some data is unavailable or outside the checked scope; these are not zero balances."] : []),
+    "Rewards cover current votes and selected gauges only. Historical rewards, LP position value and total wallet value are not calculated."
+  ];
 }

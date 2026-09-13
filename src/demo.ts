@@ -36,7 +36,7 @@ async function main() {
     await Promise.all([client.connect(a), server.connect(b)]);
     const overview = await client.callTool({ name: "aerodrome_wallet_overview", arguments: { wallet: address(2), gauges: [address(4)] } });
     assert.equal(overview.isError, undefined);
-    console.log(JSON.stringify({ source: "SYNTHETIC - address-only overview, no RPC", summaryRu: walletOverviewSchema.parse(overview.structuredContent).summaryRu }, null, 2));
+    console.log(JSON.stringify({ source: "SYNTHETIC - address-only overview, no RPC", summary: walletOverviewSchema.parse(overview.structuredContent).summary }, null, 2));
     for (let run = 0; run < 2; run++) {
       const response = await client.callTool({ name: "aerodrome_wallet_changes", arguments: { requestId: randomUUID() } });
       assert.equal(response.isError, undefined);

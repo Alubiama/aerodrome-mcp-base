@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-09-13
+
+- Switched generated summaries, change explanations and client instructions to English.
+- Renamed response fields to `summary` and `findings[].message`; updated demo, tests and documentation.
+- Existing 0.2.0 reports remain readable: English descriptions are rendered from stored evidence without changing report IDs, raw changes or observations, and without RPC or a write during retrieval.
+
+Client migration: replace `summaryRu` and `findings[].messageRu` with the new English field names.
+
 ## 0.2.0 — 2026-09-13
 
 - Added `aerodrome_wallet_overview`: a public address is sufficient for bounded liquid balances, discovered owned veNFTs, normal locked principal, voting state, current rewards and a Russian brief at one rechecked Base block.

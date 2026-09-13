@@ -106,12 +106,12 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.2.0" },
+    { name: "aerodrome-readonly", version: "0.2.1" },
     {
       instructions:
-        "Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +
+        "Use English for user-facing explanations. Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +
         "Read it again with aerodrome_wallet_report and reportId=requestId, without RPC or baseline updates. A new UUID starts a new comparison. " +
-        "For an address-first wallet review use aerodrome_wallet_overview. Keep liquid funds, locks, voting power and rewards separate. Use summaryRu/findings with raw evidence. For configured snapshots use aerodrome_wallet_snapshot. Compare explicit pool addresses with aerodrome_compare_pools. " +
+        "For an address-first wallet review use aerodrome_wallet_overview. Keep liquid funds, locks, voting power and rewards separate. Use summary/findings with raw evidence. For configured snapshots use aerodrome_wallet_snapshot. Compare explicit pool addresses with aerodrome_compare_pools. " +
         "Preserve PARTIAL and coverage limits; missing is not zero, reward decreases do not prove income, weights are not yield. " +
         "Report the block interval, changed and unavailable sections, and epoch changes. No signing, broadcasting or profitability proof. " +
         "Never generate a new requestId merely to reformat an answer or recover a lost response. " +
@@ -214,7 +214,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
 
   server.registerTool("aerodrome_wallet_overview", {
     title: "Wallet overview from one address",
-    description: "Discover up to 16 owned veNFTs directly from the official escrow. Report ETH, escrow-token, USDC and selected token balances, normal locked principal, voting state and bounded rewards at one block. Includes a Russian brief. No wallet config or manual veNFT IDs needed when wallet is supplied. Preserve partial and managed-position limits; no total net worth or APR.",
+    description: "Discover up to 16 owned veNFTs directly from the official escrow. Report ETH, escrow-token, USDC and selected token balances, normal locked principal, voting state and bounded rewards at one block. Includes an English brief. No wallet config or manual veNFT IDs needed when wallet is supplied. Preserve partial and managed-position limits; no total net worth or APR.",
     inputSchema: walletOverviewInputSchema, outputSchema: walletOverviewSchema, annotations: readOnlyAnnotations
   }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
     if (!services.walletOverview) throw new Error("Overview service unavailable.");

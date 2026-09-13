@@ -19,7 +19,7 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
   current.rewards.votingRewards[0].amountRaw = "2";
   const delta = compareWalletSnapshots(baseline, current);
   assert.equal(delta.status, "COMPARED");
-  assert.ok(delta.findings.some(row => row.code === "VOTING_POWER_CHANGED" && row.messageRu.includes("не доказывает")));
+  assert.ok(delta.findings.some(row => row.code === "VOTING_POWER_CHANGED" && row.message.includes("does not establish")));
   const rewardFinding = delta.findings.find(row => row.code === "REWARD_CHANGED")!;
   assert.equal(rewardFinding.deltaFormatted, "-0.000000000000000003");
   assert.equal(rewardFinding.fromBlock, "123");
@@ -28,7 +28,7 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
   unknownUnits.rewards.votingRewards[0].decimalsSource = "UNKNOWN";
   const unknownFinding = compareWalletSnapshots(baseline, unknownUnits).findings.find(row => row.code === "REWARD_CHANGED")!;
   assert.equal(unknownFinding.deltaFormatted, null);
-  assert.ok(unknownFinding.messageRu.includes("точность неизвестна"));
+  assert.ok(unknownFinding.message.includes("decimals unknown"));
   assert.equal(delta.changes.find(x => x.key.endsWith("currentVotingPowerRaw"))?.deltaRaw, (9007199254740993999n - BigInt(baseline.voting.positions[0].currentVotingPowerRaw)).toString());
   assert.equal(delta.changes.find(x => x.section === "rewards")?.deltaRaw, "-3");
   assert.equal(compareWalletSnapshots(baseline, baseline).changes.length, 0);
@@ -98,6 +98,20 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
     const aliasCfg = { ...cfg, veNftTokenIds: ["01"], gaugeAddresses: [...cfg.gaugeAddresses, ...cfg.gaugeAddresses].map(x => x.toLowerCase()), contracts: Object.fromEntries(Object.entries(cfg.contracts).reverse().map(([key, value]) => [key, value.toLowerCase()])) as typeof cfg.contracts };
     assert.deepEqual(await getWalletChanges({ cfg: aliasCfg, client: {} }, directory, noRPC, { requestId: secondId }), second);
     const saved = fs.readFileSync(file, "utf8");
+    const legacyHistory = JSON.parse(saved);
+    for (const report of legacyHistory.reports) report.findings = report.findings.map((finding: any) => {
+      const { message, ...evidence } = finding;
+      return { ...evidence, messageRu: "Legacy localized text" };
+    });
+    const legacyBodyForReplay = JSON.stringify(legacyHistory);
+    fs.writeFileSync(file, legacyBodyForReplay);
+    const englishReplay = await getWalletReport({ reportId: secondId }, runtime, directory);
+    assert.deepEqual(englishReplay.changes, second.changes);
+    assert.equal(englishReplay.reportId, second.reportId);
+    assert.ok(englishReplay.findings.every(finding => typeof finding.message === "string" && !("messageRu" in finding)));
+    assert.ok(englishReplay.findings.some(finding => finding.message.includes("reward amount changed")));
+    assert.equal(fs.readFileSync(file, "utf8"), legacyBodyForReplay);
+    fs.writeFileSync(file, saved);
     await assert.rejects(capture(baseline), /older/);
     assert.equal(fs.readFileSync(file, "utf8"), saved);
     const controller = new AbortController();

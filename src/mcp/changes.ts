@@ -1,5 +1,5 @@
 import { walletAddress } from "../config.js";
-import { explainChanges, findingSchema } from "./findings.js";
+import { explainChanges, findingSchema, renderLegacyFinding } from "./findings.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,9 +124,17 @@ export const walletChangesInputSchema = z.strictObject({
 export const walletReportInputSchema = z.strictObject({ reportId: z.uuid().transform(value => value.toLowerCase()) });
 export type WalletChangesInput = z.infer<typeof walletChangesInputSchema>;
 export type WalletReportInput = z.infer<typeof walletReportInputSchema>;
+const storedReportSchema = z.union([
+  walletChangesSchema,
+  walletChangesSchema.extend({ findings: z.array(findingSchema.omit({ message: true }).extend({ messageRu: z.string() })) })
+]).transform(report => ({ ...report, findings: report.findings.map(finding => {
+  if ("message" in finding) return finding;
+  const { messageRu: _legacyText, ...evidence } = finding;
+  return { ...evidence, message: renderLegacyFinding(evidence, report.changes.find(change => change.key === evidence.key)) };
+}) }));
 const historySchema = z.strictObject({
   version: z.literal(2), scope: z.string(), snapshot: walletSnapshotSchema.nullable(),
-  reports: z.array(walletChangesSchema).max(100)
+  reports: z.array(storedReportSchema).max(100)
 });
 type History = z.infer<typeof historySchema>;
 const MAX_BYTES = 32_000_000;
