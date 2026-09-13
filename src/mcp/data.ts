@@ -62,7 +62,7 @@ async function assertBaseChain(client: any): Promise<number> {
   return chainId;
 }
 
-async function observation(client: any): Promise<{ rawBlockNumber: bigint; rawTimestamp: bigint; value: Observation }> {
+export async function observation(client: any): Promise<{ rawBlockNumber: bigint; rawTimestamp: bigint; value: Observation }> {
   const block = await client.getBlock({ blockTag: "latest" });
   if (typeof block.number !== "bigint" || typeof block.timestamp !== "bigint") {
     throw new Error("Base RPC returned a latest block without number or timestamp.");
@@ -171,7 +171,7 @@ async function currentPoolVotesAtBlock(
 
 function parseTokenIds(input: string[] | undefined, cfg: AppConfig): bigint[] {
   const raw = input ?? veTokenIds(cfg).map(String);
-  if (raw.length < 1 || raw.length > MAX_TOOL_TOKEN_IDS) {
+  if ((input !== undefined && raw.length < 1) || raw.length > MAX_TOOL_TOKEN_IDS) {
     throw new Error(`tokenIds must contain between 1 and ${MAX_TOOL_TOKEN_IDS} items.`);
   }
   const parsed = raw.map((value) => {
@@ -360,6 +360,7 @@ export async function getWalletRewards(
 ) {
   runtime.signal?.throwIfAborted();
   const { cfg, client } = runtime;
+  const wallet = walletAddress(cfg);
   const includeZero = input.includeZero === true;
   const maxItems = input.maxItems ?? 100;
   if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 200) throw new Error("maxItems must be between 1 and 200.");
@@ -367,7 +368,6 @@ export async function getWalletRewards(
   const chainId = await assertBaseChain(client);
   const obs = runtime.pinnedObservation ?? await observation(client);
   const voter = voterAddress(cfg);
-  const wallet = walletAddress(cfg);
   const warnings = [
     "Zero rows mean no reward was observed in this bounded scope; they do not prove that no older unclaimed reward exists."
   ];
@@ -494,8 +494,9 @@ export async function getWalletRewards(
           token: meta.address,
           symbol: meta.symbol,
           decimals: meta.decimals,
+          decimalsSource: meta.decimalsSource,
           amountRaw: amount.toString(),
-          amountFormatted: formatUnits(amount, meta.decimals)
+          amountFormatted: meta.decimalsSource === "ASSUMED" ? null : formatUnits(amount, meta.decimals)
         });
       }
     }
@@ -547,8 +548,9 @@ export async function getWalletRewards(
       token: meta.address,
       symbol: meta.symbol,
       decimals: meta.decimals,
+      decimalsSource: meta.decimalsSource,
       amountRaw: amount.toString(),
-      amountFormatted: formatUnits(amount, meta.decimals)
+      amountFormatted: meta.decimalsSource === "ASSUMED" ? null : formatUnits(amount, meta.decimals)
     });
   }
 
@@ -567,7 +569,7 @@ export async function getWalletRewards(
       scope: "configured veNFT current votes plus explicitly configured LP gauges",
       historicalUnclaimedPools: "not scanned and may be omitted",
       tokenPrices: "not included",
-      displayMetadata: runtime.pinnedObservation ? "untrusted token labels read at the observed block; non-USDC decimals may fall back to 18" : "untrusted token labels; latest or process cache, not the observed block; non-USDC decimals may fall back to 18",
+      displayMetadata: runtime.pinnedObservation ? "untrusted token labels read at the observed block; unverified decimals are marked ASSUMED and formatted amounts omitted" : "untrusted token labels; latest or process cache, not the observed block; unverified decimals are marked ASSUMED and formatted amounts omitted",
       realizableValue: "not calculated"
     },
     warnings
@@ -580,6 +582,7 @@ export async function getWalletSnapshot(
   runtime: ToolRuntime = createDefaultRuntime()
 ) {
   runtime.signal?.throwIfAborted();
+  walletAddress(runtime.cfg);
   await assertBaseChain(runtime.client);
   const obs = await observation(runtime.client);
   if (!obs.value.blockHash || !/^0x[0-9a-fA-F]{64}$/.test(obs.value.blockHash)) {

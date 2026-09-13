@@ -6,7 +6,7 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.1.1**. License: MIT.
+Version: **0.2.0**. License: MIT.
 
 ## Quick start
 
@@ -26,15 +26,15 @@ npm test
 npm run demo
 ```
 
-The demo uses synthetic data, a real local MCP connection and temporary storage. It needs no wallet, network, API key or model. Expect two calls: `BASELINE_CREATED`, then `COMPARED`, with a test reward amount increasing from 100 to 125 raw units.
+The demo uses synthetic data, a real local MCP connection and temporary storage. It needs no wallet, network, API key or model. It shows an address-only overview followed by `BASELINE_CREATED` and `COMPARED`, with a test reward amount increasing from 100 to 125 raw units.
 
-For live reads:
+To set optional local wallet defaults:
 
 ```sh
 cp config.example.json config.json
 ```
 
-Replace the **synthetic** wallet and token ID in `config.json` with your public wallet address and owned Aerodrome veNFT IDs. Add gauge addresses only if you want LP rewards checked. Never enter a seed phrase or private key. Unknown configuration fields are rejected. Configured veNFT ownership is checked for wallet reward reads.
+Local configuration is optional for public protocol/pool reads and for `wallet_overview` with an explicit wallet address. If using `config.json`, replace its **synthetic** wallet with your public address. `veNftTokenIds` may be empty; the overview discovers owned IDs automatically. Configured snapshot/change tools continue to use the explicitly configured IDs. Add gauge addresses only if you want LP rewards checked. Never enter a seed phrase or private key. Unknown configuration fields are rejected. Configured veNFT ownership is checked for wallet reward reads.
 
 ## Connect an MCP client
 
@@ -69,10 +69,32 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 | `aerodrome_protocol_status` | Official contract identity, block, epoch and protocol weights |
 | `aerodrome_voting_position` | Configured or supplied veNFT voting positions |
 | `aerodrome_wallet_rewards` | Current-vote reward scope and explicitly configured LP gauges |
+| `aerodrome_wallet_overview` | Address-first balances, automatic veNFT discovery, locks, voting, rewards and a Russian brief |
 | `aerodrome_wallet_snapshot` | All wallet sections at one block with a final block-hash recheck |
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
 | `aerodrome_wallet_changes` | Capture with a UUID `requestId`; retry the same ID to recover the same report |
 | `aerodrome_wallet_report` | Retrieve a saved report by `reportId`, without RPC or baseline changes |
+
+## One-address overview (0.2.0)
+
+```json
+{"name":"aerodrome_wallet_overview","arguments":{"wallet":"0x0000000000000000000000000000000000000002"}}
+```
+
+Use your own public address instead of the synthetic example. No manual veNFT IDs or local config are required. The result separates:
+
+- Liquid ETH, the escrow's underlying token (AERO), configured USDC and up to 16 extra `tokens` supplied by address. This is a bounded token list, not all assets in a wallet.
+- Up to 16 directly owned veNFTs from the official escrow owner list, with verified ownership, normal locked principal and unlock time.
+- Current voting power and epoch state. The normal voting window alone does not establish transaction eligibility or success.
+- Current-vote rewards and up to 16 explicitly supplied `gauges`. Configured gauges are inherited only for the same configured wallet. LP principal valuation, historical rewards, rebases and managed rewards are not included.
+
+`summaryRu` gives a Russian brief; structured values retain addresses, source links, raw amounts and the common observed block. Missing values are null. Failed sections leave independently verified sections available; a changed block hash rejects the whole observation. Managed positions have `UNSUPPORTED_MANAGED` and null personal principal: pooled balances must not be attributed to the wallet owner. No aggregate net worth is calculated.
+
+`decimalsSource` distinguishes on-chain/canonical units from assumed or unknown units. New reward reads set `amountFormatted=null` if decimals are assumed; the raw amount remains available. Token labels are untrusted display data.
+
+The overview is a fresh read and does not update local history. `wallet_changes` still compares configured veNFT/current-reward scope; it does not yet track liquid-balance or lock-principal history. New reports include `findings`: Russian explanations with codes, block interval and source links. They describe observations, not inferred deposits, sales or claimed income. Old reports remain retrievable and may have no findings or unit provenance.
+
+Protocol basis: the official [VotingEscrow implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/VotingEscrow.sol) and [interface](https://github.com/aerodrome-finance/contracts/blob/main/contracts/interfaces/IVotingEscrow.sol) define owner enumeration, lock tuples and managed escrow types. Runtime reads are pinned to a single Base block and rechecked; these source references are not a substitute for RPC verification.
 
 ## Read the result correctly
 
@@ -82,7 +104,7 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 - When a configured veNFT has another owner, `excludedTokenIds` records its ID and observed owner. Other owned veNFT and configured gauge rewards are still returned. Rewards are marked partial; the voting section can still show the ownership change. A failed ownership RPC still fails the read; it is not evidence of a transfer.
 - Missing reward rows mean **unknown**, not zero. A reward decrease does not prove a claim or income.
 - Historical vote pools and historical unclaimed rewards are not scanned. Zero current rewards does not prove no historical rewards.
-- Raw amounts are authoritative within the RPC evidence. Token labels are untrusted; non-USDC decimals can fall back to 18 for display.
+- Raw amounts are authoritative within the RPC evidence. Token labels are untrusted; unverified decimals are identified and new reads leave their formatted amount null. Legacy reports may contain an older display fallback; retain raw amounts and provenance.
 - Voting weight is not APR. Prices, liquidity, volume and profitability are not calculated. Basis-point shares are rounded down; 0 bps can represent a positive share below 0.01%.
 
 ## Capture, retry and read again (0.1.1)

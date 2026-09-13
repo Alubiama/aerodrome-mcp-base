@@ -19,6 +19,16 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
   current.rewards.votingRewards[0].amountRaw = "2";
   const delta = compareWalletSnapshots(baseline, current);
   assert.equal(delta.status, "COMPARED");
+  assert.ok(delta.findings.some(row => row.code === "VOTING_POWER_CHANGED" && row.messageRu.includes("не доказывает")));
+  const rewardFinding = delta.findings.find(row => row.code === "REWARD_CHANGED")!;
+  assert.equal(rewardFinding.deltaFormatted, "-0.000000000000000003");
+  assert.equal(rewardFinding.fromBlock, "123");
+  assert.equal(rewardFinding.toBlock, "124");
+  const unknownUnits = structuredClone(current);
+  unknownUnits.rewards.votingRewards[0].decimalsSource = "UNKNOWN";
+  const unknownFinding = compareWalletSnapshots(baseline, unknownUnits).findings.find(row => row.code === "REWARD_CHANGED")!;
+  assert.equal(unknownFinding.deltaFormatted, null);
+  assert.ok(unknownFinding.messageRu.includes("точность неизвестна"));
   assert.equal(delta.changes.find(x => x.key.endsWith("currentVotingPowerRaw"))?.deltaRaw, (9007199254740993999n - BigInt(baseline.voting.positions[0].currentVotingPowerRaw)).toString());
   assert.equal(delta.changes.find(x => x.section === "rewards")?.deltaRaw, "-3");
   assert.equal(compareWalletSnapshots(baseline, baseline).changes.length, 0);
@@ -33,6 +43,7 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
   const partialDelta = compareWalletSnapshots(baseline, partial);
   assert.equal(partialDelta.changes.some(x => x.section === "rewards"), false);
   assert.deepEqual(partialDelta.unavailableSections, ["rewards"]);
+  assert.ok(partialDelta.findings.some(row => row.code === "SECTION_UNAVAILABLE"));
   const other = structuredClone(current);
   other.rewards.wallet = "0x0000000000000000000000000000000000000099";
   assert.throws(() => compareWalletSnapshots(baseline, other), /identity/);
@@ -121,7 +132,7 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
     // Migrate a real v1 layout even when the caller changes spelling/order.
     const legacyDir = path.join(directory, "legacy");
     fs.mkdirSync(legacyDir);
-    const oldScope = JSON.stringify({ version: 1, wallet: cfg.walletAddress.toLowerCase(), ids: ["01"], gauges: cfg.gaugeAddresses.map(x => x.toLowerCase()).sort(), contracts: cfg.contracts, includeZero: true, maxItems: 200 });
+    const oldScope = JSON.stringify({ version: 1, wallet: cfg.walletAddress!.toLowerCase(), ids: ["01"], gauges: cfg.gaugeAddresses.map(x => x.toLowerCase()).sort(), contracts: cfg.contracts, includeZero: true, maxItems: 200 });
     const legacyPath = path.join(legacyDir, `${createHash("sha256").update(oldScope).digest("hex")}.json`);
     const legacyBody = JSON.stringify({ version: 1, scope: oldScope, snapshot: baseline });
     fs.writeFileSync(legacyPath, legacyBody);

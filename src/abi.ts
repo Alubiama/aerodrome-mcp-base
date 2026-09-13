@@ -42,6 +42,11 @@ export const votingRewardAbi = parseAbi([
 ]);
 
 export const veAbi = parseAbi([
+  "function balanceOf(address owner) view returns (uint256)",
+  "function ownerToNFTokenIdList(address owner, uint256 index) view returns (uint256)",
+  "function token() view returns (address)",
+  "function locked(uint256 tokenId) view returns ((int128 amount, uint256 end, bool isPermanent))",
+  "function escrowType(uint256 tokenId) view returns (uint8)",
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function isApprovedOrOwner(address spender, uint256 tokenId) view returns (bool)",
   "function balanceOfNFT(uint256 tokenId) view returns (uint256)"

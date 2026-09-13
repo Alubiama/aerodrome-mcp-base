@@ -9,6 +9,7 @@ import type { AppConfig } from "./types.js";
 import { getPoolComparison, getWalletSnapshot, getProtocolStatus, getVotingPosition, getWalletRewards, unixSecondsToIso } from "./mcp/data.js";
 import { createAeroMcpServer } from "./mcp/server.js";
 import { poolComparisonSchema, poolComparisonInputSchema, walletSnapshotSchema } from "./mcp/schema.js";
+import { testWalletOverview } from "./overview-test.js";
 import { testWalletChanges } from "./wallet-changes-test.js";
 import { makeClient } from "./client.js";
 
@@ -540,6 +541,7 @@ async function testPoolComparison() {
 }
 
 async function main() {
+  await testWalletOverview();
   await testRequestControls();
   await testRpcCancellationIsolation();
   await testDataSafety();
@@ -583,6 +585,7 @@ async function main() {
     "aerodrome_protocol_status",
     "aerodrome_voting_position",
     "aerodrome_wallet_changes",
+    "aerodrome_wallet_overview",
     "aerodrome_wallet_report",
     "aerodrome_wallet_rewards",
     "aerodrome_wallet_snapshot"
@@ -664,7 +667,7 @@ async function main() {
   assert.deepEqual(stdioTools.tools.map((tool) => tool.name).sort(), listed.tools.map((tool) => tool.name).sort());
   await stdioClient.close();
   assert.match(childStderr, /Aerodrome read-only MCP v0\.1 running on stdio/);
-  console.log("MCP tests passed: data safety, Base chain checks, 7 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
+  console.log("MCP tests passed: data safety, Base chain checks, 8 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
 }
 
 main().catch((error) => {

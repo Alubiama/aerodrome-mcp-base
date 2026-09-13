@@ -1,3 +1,5 @@
+import { walletAddress } from "../config.js";
+import { explainChanges, findingSchema } from "./findings.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +22,7 @@ export const walletChangesSchema = z.strictObject({
     kind: z.enum(["CHANGED", "APPEARED", "NO_LONGER_OBSERVED"]),
     before: scalar, after: scalar, deltaRaw: z.string().regex(/^-?\d+$/).nullable()
   })),
+  findings: z.array(findingSchema).default([]),
   unavailableSections: z.array(z.enum(["voting", "rewards"])),
   warnings: z.array(z.string())
 });
@@ -108,7 +111,7 @@ export function compareWalletSnapshots(previous: Snapshot | null, current: Snaps
     chainId: 8453, blockchainReadOnly: true, observation: current.observation,
     previousObservation: previous?.observation ?? null, reportId: null, reportSaved: false, baselineSaved: false,
     epochChanged: previous ? previous.protocol.epoch.start !== current.protocol.epoch.start : null,
-    changes, unavailableSections,
+    changes, unavailableSections, findings: explainChanges(previous, current, changes, unavailableSections),
     warnings: [...current.warnings,
       "Only observed current-scope values are compared. Missing rows are unknown, not zero. A reward decrease does not prove a claim or income.",
       ...(!complete(current) ? ["Partial snapshot did not replace the last complete baseline; unavailable sections were not compared."] : [])]
@@ -131,7 +134,7 @@ export class HistoryError extends Error {
   constructor(public code: "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL") { super(code); }
 }
 function scopeFor(runtime: ToolRuntime) {
-  return canonicalScope({ wallet: runtime.cfg.walletAddress, ids: runtime.cfg.veNftTokenIds,
+  return canonicalScope({ wallet: walletAddress(runtime.cfg), ids: runtime.cfg.veNftTokenIds,
     gauges: runtime.cfg.gaugeAddresses, contracts: runtime.cfg.contracts });
 }
 function canonicalScope(value: { wallet: string; ids: string[]; gauges: string[]; contracts: Record<string, string> }) {
@@ -220,7 +223,7 @@ export async function getWalletChanges(
     if (history.reports.length >= 100) throw new HistoryError("HISTORY_FULL");
     const current = validateSnapshot(await readSnapshot());
     runtime.signal?.throwIfAborted();
-    if (current.rewards.wallet !== runtime.cfg.walletAddress.toLowerCase() ||
+    if (current.rewards.wallet !== walletAddress(runtime.cfg).toLowerCase() ||
         JSON.stringify(ids(current.rewards.configuredTokenIds)) !== JSON.stringify(ids(runtime.cfg.veNftTokenIds)) ||
         Object.entries(runtime.cfg.contracts).some(([key, value]) => current.protocol.contracts[key as keyof Snapshot["protocol"]["contracts"]] !== value.toLowerCase())) throw new Error("Snapshot scope mismatch.");
     const report = compareWalletSnapshots(history.snapshot, current);

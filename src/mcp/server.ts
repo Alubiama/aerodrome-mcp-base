@@ -1,3 +1,5 @@
+import { WalletRequiredError } from "../config.js";
+import { getWalletOverview, walletOverviewInputSchema, walletOverviewSchema, type WalletOverviewInput } from "./overview.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import {
@@ -17,6 +19,7 @@ import { walletSnapshotSchema, poolComparisonSchema, poolComparisonInputSchema }
 import { getWalletChanges, getWalletReport, walletChangesSchema, walletChangesInputSchema, walletReportInputSchema, HistoryError, type WalletChangesInput, type WalletReportInput } from "./changes.js";
 
 export type AeroMcpServices = {
+  walletOverview?: (input: WalletOverviewInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
   walletReport?: (input: WalletReportInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
   walletChanges?: (signal: AbortSignal, input: WalletChangesInput) => Promise<Record<string, unknown>>;
   poolComparison?: (input: PoolComparisonInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
@@ -50,8 +53,9 @@ function result(value: Record<string, unknown>) {
   };
 }
 
-function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL") {
+function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL" | "WALLET_REQUIRED") {
   const descriptions = {
+    WALLET_REQUIRED: "Supply wallet to aerodrome_wallet_overview, or set walletAddress in local configuration. Public protocol/pool reads do not require a wallet.",
     HISTORY_BUSY: "Another capture holds this scope lock. Retry with the SAME requestId after it finishes. After a crash, inspect the local lock before recovery.",
     REPORT_NOT_FOUND: "No committed report with this ID exists in the configured scope.",
     HISTORY_FULL: "History reached its retention limit. Export and archive it locally before starting a new history; existing reports remain readable.",
@@ -67,6 +71,7 @@ function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HIST
 }
 
 export function createAeroMcpServer(services: AeroMcpServices = {
+  walletOverview: (input, signal) => getWalletOverview(input, createDefaultRuntime(signal)),
   walletChanges: (signal, input) => getWalletChanges(createDefaultRuntime(signal), undefined, undefined, input),
   walletReport: (input, signal) => getWalletReport(input, createDefaultRuntime(signal)),
   poolComparison: (input, signal) => getPoolComparison(input, createDefaultRuntime(signal)),
@@ -91,6 +96,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
       signal.throwIfAborted();
       return result(value);
     } catch (error) {
+      if (error instanceof WalletRequiredError && !signal.aborted) return failure("WALLET_REQUIRED");
       if (error instanceof HistoryError && !signal.aborted) return failure(error.code);
       // Never echo config parser excerpts, provider text or local paths to a host.
       return failure(requestSignal.aborted ? "CANCELLED" : deadline.signal.aborted ? "DEADLINE" : "READ_FAILED");
@@ -100,12 +106,12 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.1.1" },
+    { name: "aerodrome-readonly", version: "0.2.0" },
     {
       instructions:
         "Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +
         "Read it again with aerodrome_wallet_report and reportId=requestId, without RPC or baseline updates. A new UUID starts a new comparison. " +
-        "For current wallet state use aerodrome_wallet_snapshot. Compare explicit pool addresses with aerodrome_compare_pools. " +
+        "For an address-first wallet review use aerodrome_wallet_overview. Keep liquid funds, locks, voting power and rewards separate. Use summaryRu/findings with raw evidence. For configured snapshots use aerodrome_wallet_snapshot. Compare explicit pool addresses with aerodrome_compare_pools. " +
         "Preserve PARTIAL and coverage limits; missing is not zero, reward decreases do not prove income, weights are not yield. " +
         "Report the block interval, changed and unavailable sections, and epoch changes. No signing, broadcasting or profitability proof. " +
         "Never generate a new requestId merely to reformat an answer or recover a lost response. " +
@@ -204,6 +210,15 @@ export function createAeroMcpServer(services: AeroMcpServices = {
   }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
     if (!services.walletReport) throw new Error("Report service unavailable.");
     return walletChangesSchema.parse(await services.walletReport(input, signal));
+  }));
+
+  server.registerTool("aerodrome_wallet_overview", {
+    title: "Wallet overview from one address",
+    description: "Discover up to 16 owned veNFTs directly from the official escrow. Report ETH, escrow-token, USDC and selected token balances, normal locked principal, voting state and bounded rewards at one block. Includes a Russian brief. No wallet config or manual veNFT IDs needed when wallet is supplied. Preserve partial and managed-position limits; no total net worth or APR.",
+    inputSchema: walletOverviewInputSchema, outputSchema: walletOverviewSchema, annotations: readOnlyAnnotations
+  }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
+    if (!services.walletOverview) throw new Error("Overview service unavailable.");
+    return walletOverviewSchema.parse(await services.walletOverview(input, signal));
   }));
 
   return server;

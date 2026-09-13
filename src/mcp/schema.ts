@@ -25,7 +25,7 @@ const voting = z.strictObject({
   })),
   coverage: z.strictObject({ scope: z.string(), historicalVotes: z.string(), profitability: z.string() })
 });
-const reward = { gauge: address, token: address, symbol: z.string(), decimals: z.number().int().min(0).max(36), amountRaw: uint, amountFormatted: z.string().regex(/^\d+(\.\d+)?$/) };
+const reward = { gauge: address, token: address, symbol: z.string(), decimals: z.number().int().min(0).max(36), decimalsSource: z.enum(["ONCHAIN", "CANONICAL", "ASSUMED", "UNKNOWN"]).default("UNKNOWN"), amountRaw: uint, amountFormatted: z.string().regex(/^\d+(\.\d+)?$/).nullable() };
 const rewards = z.strictObject({
   ...common, status: z.enum(["VERIFIED_BOUNDED_SCOPE", "PARTIAL_BOUNDED_SCOPE"]), wallet: address,
   configuredTokenIds: z.array(uint),
