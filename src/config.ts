@@ -14,7 +14,7 @@ export function loadConfig(): AppConfig {
  const filename = fileURLToPath(new URL("../config.json", import.meta.url));
  if (fs.statSync(filename).size > 64000) throw new Error("Configuration too large.");
  const input = configSchema.parse(JSON.parse(fs.readFileSync(filename, "utf8")));
- return { ...input, baseRpcUrl: "https://mainnet.base.org",
+ return { ...input, walletAddress: getAddress(input.walletAddress), veNftTokenIds: input.veNftTokenIds.map(value => BigInt(value).toString()), gaugeAddresses: uniqAddresses(input.gaugeAddresses.map(value => getAddress(value))), baseRpcUrl: "https://mainnet.base.org",
  contracts: { voter: "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5", router: "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43", defaultFactory: "0x420DD381b31aEf6683db6B902084cB0FFECe40Da" },
  tokens: { USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" } };
 }

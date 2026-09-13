@@ -386,6 +386,8 @@ export async function getWalletRewards(
       blockNumber: obs.rawBlockNumber
     }, "Voter.ve")
   ]);
+  const ownedTokenIds: bigint[] = [];
+  const excludedTokenIds: Array<{ tokenId: string; owner: Address; reason: "NOT_OWNED" }> = [];
   for (const tokenId of tokenIds) {
     runtime.signal?.throwIfAborted();
     const owner = await readRequired<Address>(client, {
@@ -396,12 +398,16 @@ export async function getWalletRewards(
       blockNumber: obs.rawBlockNumber
     }, `ownerOf(${tokenId})`);
     if (getAddress(owner) !== wallet) {
-      throw new Error(`Configured veNFT #${tokenId} is not owned by the configured wallet.`);
+      incomplete = true;
+      excludedTokenIds.push({ tokenId: tokenId.toString(), owner: getAddress(owner), reason: "NOT_OWNED" });
+      warnings.push(`Configured veNFT #${tokenId} is not owned by the configured wallet; its rewards were excluded. Other owned veNFT and gauge reads continue.`);
+    } else {
+      ownedTokenIds.push(tokenId);
     }
   }
 
   const tokenPools: Array<{ tokenId: bigint; pool: Address }> = [];
-  for (const tokenId of tokenIds) {
+  for (const tokenId of ownedTokenIds) {
     runtime.signal?.throwIfAborted();
     const pools = await currentPoolVotesAtBlock(client, voter, tokenId, obs.rawBlockNumber, maxVotingNum);
     tokenPools.push(...pools.map((pool) => ({ tokenId, pool })));
@@ -552,6 +558,7 @@ export async function getWalletRewards(
     chainId,
     wallet,
     configuredTokenIds: tokenIds.map(String),
+    excludedTokenIds,
     observation: obs.value,
     votingRewards: votingRows,
     gaugeRewards: gaugeRows,

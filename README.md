@@ -6,7 +6,7 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.1.0**. License: MIT.
+Version: **0.1.1**. License: MIT.
 
 ## Quick start
 
@@ -71,21 +71,41 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 | `aerodrome_wallet_rewards` | Current-vote reward scope and explicitly configured LP gauges |
 | `aerodrome_wallet_snapshot` | All wallet sections at one block with a final block-hash recheck |
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
-| `aerodrome_wallet_changes` | New snapshot versus the last complete local baseline |
+| `aerodrome_wallet_changes` | Capture with a UUID `requestId`; retry the same ID to recover the same report |
+| `aerodrome_wallet_report` | Retrieve a saved report by `reportId`, without RPC or baseline changes |
 
 ## Read the result correctly
 
 - `BASELINE_CREATED`: no earlier snapshot exists. It does **not** mean no changes occurred.
-- `COMPARED`: changes relative to the last complete baseline. The call updates that baseline; do not repeat it merely to reformat an answer.
-- `PARTIAL`: unavailable sections are not compared and the previous complete baseline is retained.
+- `COMPARED`: changes relative to the last complete baseline. A new request ID updates that baseline. Reusing the same request ID returns the original report, including its original block interval.
+- `PARTIAL`: the report is saved, unavailable sections are not compared, and the previous complete baseline is retained.
+- When a configured veNFT has another owner, `excludedTokenIds` records its ID and observed owner. Other owned veNFT and configured gauge rewards are still returned. Rewards are marked partial; the voting section can still show the ownership change. A failed ownership RPC still fails the read; it is not evidence of a transfer.
 - Missing reward rows mean **unknown**, not zero. A reward decrease does not prove a claim or income.
 - Historical vote pools and historical unclaimed rewards are not scanned. Zero current rewards does not prove no historical rewards.
 - Raw amounts are authoritative within the RPC evidence. Token labels are untrusted; non-USDC decimals can fall back to 18 for display.
 - Voting weight is not APR. Prices, liquidity, volume and profitability are not calculated. Basis-point shares are rounded down; 0 bps can represent a positive share below 0.01%.
 
+## Capture, retry and read again (0.1.1)
+
+**Upgrade:** stop older server processes before switching versions; mixed-version writers do not share the new canonical lock. `aerodrome_wallet_changes` now requires a client-generated UUID `requestId`. Generate it **before** sending the call and retain it until the response is received. Old calls with `{}` are rejected before any RPC or baseline update.
+
+```json
+{"name":"aerodrome_wallet_changes","arguments":{"requestId":"a8098c1a-f86e-4b13-9ac8-83efbafec0d1"}}
+```
+
+If the response is lost, repeat that exact call. It returns the same saved report and never consumes the comparison twice. To read it later, including after server restart:
+
+```json
+{"name":"aerodrome_wallet_report","arguments":{"reportId":"a8098c1a-f86e-4b13-9ac8-83efbafec0d1"}}
+```
+
+The example UUID is illustrative: use a fresh UUID only when deliberately requesting a **new** comparison. `reportId` equals the original `requestId`. `reportSaved` confirms the atomic commit; `baselineSaved` describes that original capture, not an update during replay. IDs are scoped to the configured wallet, veNFTs, gauges and contracts. Changing actual scope selects a different history; changing `1` to `01`, address case, or gauge ordering does not.
+
+Two processes share an exclusive scope lock acquired before RPC. A competing capture gets `HISTORY_BUSY`; retry with the **same** ID after the writer finishes. Already committed reports remain readable while a writer holds the lock. After an interrupted uncommitted capture, verify that its process has stopped before removing its leftover lock, then retry the same ID. RPC failure or cancellation before commit leaves the baseline and reports unchanged.
+
 ## Local data and boundaries
 
-`config.json` and `.snapshot-history/` are local and git-ignored. History retains one complete baseline per configured scope, not every past snapshot. New history directories use 0700, files 0600, with atomic replacement and exclusive locks; files are not encrypted. Corrupt history fails closed. After a crash, inspect the process before manually removing a leftover `.lock`.
+`config.json` and `.snapshot-history/` are local and git-ignored. History retains one complete baseline plus immutable change reports per configured scope, not every past snapshot. Report and baseline are stored together in one atomic replacement. Each scope is limited to 100 reports and 32 MB: `HISTORY_FULL` refuses new captures rather than evicting retry IDs. Existing reports remain readable. Archive the history locally before explicitly starting a new history; old IDs require the archived history and original scope. New history directories use 0700, files 0600, with atomic replacement and exclusive locks; files are not encrypted. Atomic replacement protects against process interruption; power-loss durability and network filesystems are not guaranteed. Corrupt history fails closed. Version 1 baselines are imported on the next successful capture; equivalent noncanonical files are retained. If several equivalent legacy baselines exist, capture stops for manual reconciliation rather than choosing one silently. After a crash, inspect the process before manually removing a leftover `.lock`.
 
 `wallet_changes` writes local history (`readOnlyHint=false`); every tool is read-only on chain. No keys, signing, transactions, model calls, schedules or automatic farming. Public RPC endpoints see requested addresses, and the connected MCP client receives configured wallet evidence. Endpoints: `mainnet.base.org`, `mainnet-preconf.base.org`, `base-rpc.publicnode.com`.
 

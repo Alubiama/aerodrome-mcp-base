@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -26,13 +27,13 @@ async function main() {
   for (const invalid of [{ ...input, privateKey: "never-a-real-key" }, { ...input, veNftTokenIds: ["0"] }, { ...input, veNftTokenIds: ["1", "01"] }, { ...input, walletAddress: "invalid" }]) assert.equal(configSchema.safeParse(invalid).success, false);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aerodrome-demo-"));
   let step = 0;
-  const server = createAeroMcpServer({ protocolStatus: async () => ({}), votingPosition: async () => ({}), walletRewards: async () => ({}), walletChanges: async () => getWalletChanges({ cfg, client: {} }, dir, async () => snapshot(step++)) });
+  const server = createAeroMcpServer({ protocolStatus: async () => ({}), votingPosition: async () => ({}), walletRewards: async () => ({}), walletChanges: async (_signal, input) => getWalletChanges({ cfg, client: {} }, dir, async () => snapshot(step++), input) });
   const client = new Client({ name: "offline-demo", version: "0.1.0" });
   const [a,b] = InMemoryTransport.createLinkedPair();
   try {
     await Promise.all([client.connect(a), server.connect(b)]);
     for (let run = 0; run < 2; run++) {
-      const response = await client.callTool({ name: "aerodrome_wallet_changes", arguments: {} });
+      const response = await client.callTool({ name: "aerodrome_wallet_changes", arguments: { requestId: randomUUID() } });
       assert.equal(response.isError, undefined);
       const result = walletChangesSchema.parse(response.structuredContent);
       assert.equal(result.status, run ? "COMPARED" : "BASELINE_CREATED");

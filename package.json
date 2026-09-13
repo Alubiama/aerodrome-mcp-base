@@ -1,6 +1,6 @@
 {
   "name": "aerodrome-mcp-base",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Read-only Aerodrome evidence and local wallet change tracking on Base.",
   "license": "MIT",

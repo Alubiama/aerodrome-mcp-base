@@ -191,10 +191,20 @@ async function testDataSafety() {
   assert.equal(rewards.totals.examinedItems, 2);
   assert.equal(rewards.status, "VERIFIED_BOUNDED_SCOPE");
 
-  await assert.rejects(
-    getWalletRewards({}, { cfg: testConfig(), client: rewardsClient(false, POOL) }),
-    /is not owned by the configured wallet/
-  );
+  const transferred = await getWalletRewards({}, { cfg: rewardsConfig, client: rewardsClient(false, POOL) });
+  assert.equal(transferred.status, "PARTIAL_BOUNDED_SCOPE");
+  assert.equal(transferred.votingRewards.length, 0);
+  assert.equal(transferred.gaugeRewards[0].amountRaw, "7");
+  assert.deepEqual(transferred.excludedTokenIds, [{ tokenId: "1", owner: POOL, reason: "NOT_OWNED" }]);
+  const mixedBase = rewardsClient();
+  const mixed = await getWalletRewards({}, { cfg: { ...rewardsConfig, veNftTokenIds: ["1", "2"] }, client: {
+    ...mixedBase,
+    readContract: async (call: any) => call.functionName === "ownerOf" && call.args[0] === 2n ? POOL : mixedBase.readContract(call)
+  } });
+  assert.equal(mixed.status, "PARTIAL_BOUNDED_SCOPE");
+  assert.deepEqual(mixed.votingRewards.map(row => row.tokenId), ["1"]);
+  assert.equal(mixed.gaugeRewards[0].amountRaw, "7");
+  assert.equal(mixed.excludedTokenIds[0].tokenId, "2");
 
   await assert.rejects(
     getWalletRewards({ includeZero: true, maxItems: 1 }, { cfg: rewardsConfig, client: rewardsClient() }),
@@ -353,13 +363,13 @@ async function testRequestControls() {
 }
 
 async function testSnapshot() {
-  function snapshotRuntime(options: { partial?: boolean; votingPartial?: boolean; rewardsPartial?: boolean; reorg?: boolean; missingHash?: boolean } = {}) {
+  function snapshotRuntime(options: { partial?: boolean; votingPartial?: boolean; rewardsPartial?: boolean; transferred?: boolean; reorg?: boolean; missingHash?: boolean } = {}) {
     const calls: string[] = [];
     let latestReads = 0;
     let hashChecks = 0;
     const hash = `0x${"ab".repeat(32)}`;
     const base = protocolClient();
-    const rewardClient = rewardsClient(options.partial);
+    const rewardClient = rewardsClient(options.partial, options.transferred ? POOL : OWNER);
     return {
       calls,
       counts: () => ({ latestReads, hashChecks }),
@@ -397,6 +407,15 @@ async function testSnapshot() {
   assert.deepEqual(test.counts(), { latestReads: 1, hashChecks: 1 });
   for (const section of [value.protocol, value.voting, value.rewards]) assert.deepEqual(section.observation, value.observation);
   assert.ok(test.calls.includes("symbol") && test.calls.includes("decimals"), "Metadata cache must not bypass pinned reads");
+  const transferredRuntime = snapshotRuntime({ transferred: true });
+  const transferred = walletSnapshotSchema.parse(await getWalletSnapshot({}, transferredRuntime.runtime));
+  assert.equal(transferred.status, "PARTIAL_BOUNDED_SCOPE");
+  assert.equal(transferred.voting.status, "VERIFIED_POINT_IN_TIME");
+  assert.equal(transferred.voting.positions[0].owner, POOL);
+  assert.equal(transferred.rewards.gaugeRewards[0].amountRaw, "7");
+  assert.equal(transferred.rewards.votingRewards.length, 0);
+  assert.equal(transferred.rewards.excludedTokenIds[0].reason, "NOT_OWNED");
+  assert.deepEqual(transferredRuntime.counts(), { latestReads: 1, hashChecks: 1 });
   const again = snapshotRuntime();
   await getWalletSnapshot({}, again.runtime);
   assert.ok(again.calls.includes("decimals"), "Every snapshot reads fresh pinned metadata");
@@ -564,14 +583,15 @@ async function main() {
     "aerodrome_protocol_status",
     "aerodrome_voting_position",
     "aerodrome_wallet_changes",
+    "aerodrome_wallet_report",
     "aerodrome_wallet_rewards",
     "aerodrome_wallet_snapshot"
   ]);
   assert.ok(listed.tools.every((tool) =>
     tool.annotations?.readOnlyHint === (tool.name !== "aerodrome_wallet_changes") &&
     tool.annotations?.destructiveHint === false &&
-    tool.annotations?.idempotentHint === (tool.name !== "aerodrome_wallet_changes") &&
-    tool.annotations?.openWorldHint === true
+    tool.annotations?.idempotentHint === true &&
+    tool.annotations?.openWorldHint === (tool.name !== "aerodrome_wallet_report")
   ));
 
   const status = await client.callTool({ name: "aerodrome_protocol_status", arguments: {} });
@@ -644,7 +664,7 @@ async function main() {
   assert.deepEqual(stdioTools.tools.map((tool) => tool.name).sort(), listed.tools.map((tool) => tool.name).sort());
   await stdioClient.close();
   assert.match(childStderr, /Aerodrome read-only MCP v0\.1 running on stdio/);
-  console.log("MCP tests passed: data safety, Base chain checks, 6 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
+  console.log("MCP tests passed: data safety, Base chain checks, 7 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
 }
 
 main().catch((error) => {

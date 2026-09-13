@@ -29,6 +29,7 @@ const reward = { gauge: address, token: address, symbol: z.string(), decimals: z
 const rewards = z.strictObject({
   ...common, status: z.enum(["VERIFIED_BOUNDED_SCOPE", "PARTIAL_BOUNDED_SCOPE"]), wallet: address,
   configuredTokenIds: z.array(uint),
+  excludedTokenIds: z.array(z.strictObject({ tokenId: uint, owner: address, reason: z.literal("NOT_OWNED") })).default([]),
   votingRewards: z.array(z.strictObject({ ...reward, tokenId: uint, pool: address, type: z.enum(["bribe", "fee"]), rewardContract: address })),
   gaugeRewards: z.array(z.strictObject(reward)),
   totals: z.strictObject({ examinedItems: z.number().int().nonnegative(), votingRewardItems: z.number().int().nonnegative(), gaugeRewardItems: z.number().int().nonnegative() }),

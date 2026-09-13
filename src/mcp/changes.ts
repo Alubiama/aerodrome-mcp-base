@@ -13,6 +13,7 @@ export const walletChangesSchema = z.strictObject({
   chainId: z.literal(8453), blockchainReadOnly: z.literal(true),
   observation: walletSnapshotSchema.shape.observation,
   previousObservation: walletSnapshotSchema.shape.observation.nullable(),
+  reportId: z.uuid().nullable(), reportSaved: z.boolean(),
   baselineSaved: z.boolean(), epochChanged: z.boolean().nullable(),
   changes: z.array(z.strictObject({
     section: z.enum(["protocol", "voting", "rewards"]), key: z.string(),
@@ -25,11 +26,24 @@ export const walletChangesSchema = z.strictObject({
 const storedSchema = z.strictObject({ version: z.literal(1), scope: z.string(), snapshot: walletSnapshotSchema });
 const DEFAULT_STORE = fileURLToPath(new URL("../../.snapshot-history/", import.meta.url));
 
+const ids = (values: string[]) => [...new Set(values.map(value => BigInt(value).toString()))].sort();
+const addresses = (values: string[]) => [...new Set(values.map(value => value.toLowerCase()))].sort();
+const contracts = (values: Record<string, string>) => Object.fromEntries(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, value.toLowerCase()]));
+
 function validateSnapshot(value: unknown): Snapshot {
   const snapshot = walletSnapshotSchema.parse(value);
   for (const section of [snapshot.protocol, snapshot.voting, snapshot.rewards]) {
     if (JSON.stringify(section.observation) !== JSON.stringify(snapshot.observation)) throw new Error("Inconsistent snapshot observations.");
   }
+  snapshot.rewards.configuredTokenIds = ids(snapshot.rewards.configuredTokenIds);
+  snapshot.rewards.wallet = snapshot.rewards.wallet.toLowerCase();
+  for (const key of Object.keys(snapshot.protocol.contracts) as (keyof Snapshot["protocol"]["contracts"])[]) snapshot.protocol.contracts[key] = snapshot.protocol.contracts[key].toLowerCase();
+  for (const position of snapshot.voting.positions) {
+    position.tokenId = BigInt(position.tokenId).toString();
+    position.owner = position.owner.toLowerCase();
+    for (const pool of position.pools) { pool.pool = pool.pool.toLowerCase(); pool.gauge = pool.gauge.toLowerCase(); }
+  }
+  for (const row of snapshot.rewards.votingRewards) row.tokenId = BigInt(row.tokenId).toString();
   return snapshot;
 }
 function complete(snapshot: Snapshot) {
@@ -92,7 +106,7 @@ export function compareWalletSnapshots(previous: Snapshot | null, current: Snaps
   return walletChangesSchema.parse({
     status: !complete(current) ? "PARTIAL" : previous ? "COMPARED" : "BASELINE_CREATED",
     chainId: 8453, blockchainReadOnly: true, observation: current.observation,
-    previousObservation: previous?.observation ?? null, baselineSaved: false,
+    previousObservation: previous?.observation ?? null, reportId: null, reportSaved: false, baselineSaved: false,
     epochChanged: previous ? previous.protocol.epoch.start !== current.protocol.epoch.start : null,
     changes, unavailableSections,
     warnings: [...current.warnings,
@@ -101,45 +115,126 @@ export function compareWalletSnapshots(previous: Snapshot | null, current: Snaps
   });
 }
 
-/** One atomic private baseline per configured scope; no scheduler or model calls. */
-export async function getWalletChanges(
-  runtime: ToolRuntime = createDefaultRuntime(),
-  directory = DEFAULT_STORE,
-  readSnapshot: () => Promise<unknown> = () => getWalletSnapshot({ includeZero: true, maxItems: 200 }, runtime)
-) {
-  const scope = JSON.stringify({ version: 1, wallet: runtime.cfg.walletAddress.toLowerCase(),
-    ids: runtime.cfg.veNftTokenIds.map(String).sort(), gauges: runtime.cfg.gaugeAddresses.map(x => x.toLowerCase()).sort(),
-    contracts: runtime.cfg.contracts, includeZero: true, maxItems: 200 });
-  const key = createHash("sha256").update(scope).digest("hex");
-  const current = validateSnapshot(await readSnapshot());
-  runtime.signal?.throwIfAborted();
-  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const file = path.join(directory, `${key}.json`);
-  const lock = path.join(directory, `${key}.lock`);
-  // Exclusive lock also protects multiple MCP processes. Existing locks fail closed.
-  const fd = fs.openSync(lock, "wx", 0o600);
-  const temp = path.join(directory, `${key}.${randomUUID()}.tmp`);
+export const walletChangesInputSchema = z.strictObject({
+  requestId: z.uuid().transform(value => value.toLowerCase()).describe("Generate one UUID before capture. Reuse it on every retry; use a new UUID only for a new comparison.")
+});
+export const walletReportInputSchema = z.strictObject({ reportId: z.uuid().transform(value => value.toLowerCase()) });
+export type WalletChangesInput = z.infer<typeof walletChangesInputSchema>;
+export type WalletReportInput = z.infer<typeof walletReportInputSchema>;
+const historySchema = z.strictObject({
+  version: z.literal(2), scope: z.string(), snapshot: walletSnapshotSchema.nullable(),
+  reports: z.array(walletChangesSchema).max(100)
+});
+type History = z.infer<typeof historySchema>;
+const MAX_BYTES = 32_000_000;
+export class HistoryError extends Error {
+  constructor(public code: "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL") { super(code); }
+}
+function scopeFor(runtime: ToolRuntime) {
+  return canonicalScope({ wallet: runtime.cfg.walletAddress, ids: runtime.cfg.veNftTokenIds,
+    gauges: runtime.cfg.gaugeAddresses, contracts: runtime.cfg.contracts });
+}
+function canonicalScope(value: { wallet: string; ids: string[]; gauges: string[]; contracts: Record<string, string> }) {
+  return JSON.stringify({ version: 1, wallet: value.wallet.toLowerCase(), ids: ids(value.ids),
+    gauges: addresses(value.gauges), contracts: contracts(value.contracts), includeZero: true, maxItems: 200 });
+}
+function historyPath(directory: string, scope: string) {
+  return path.join(directory, `${createHash("sha256").update(scope).digest("hex")}.json`);
+}
+function readFile(file: string): unknown {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    let previous: Snapshot | null = null;
-    try {
-      const stat = fs.lstatSync(file);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4_000_000) throw new Error("Invalid baseline file.");
-      const stored = storedSchema.parse(JSON.parse(fs.readFileSync(file, "utf8")));
-      if (stored.scope !== scope) throw new Error("Baseline scope mismatch.");
-      previous = stored.snapshot;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_BYTES) throw new Error("Invalid history file.");
+    return JSON.parse(fs.readFileSync(fd, "utf8"));
+  } finally { fs.closeSync(fd); }
+}
+function readHistory(directory: string, scope: string): History {
+  const file = historyPath(directory, scope);
+  try {
+    const value = readFile(file) as { version?: number };
+    if (value.version === 2) {
+      const history = historySchema.parse(value);
+      if (history.scope !== scope || new Set(history.reports.map(r => r.reportId)).size !== history.reports.length ||
+          history.reports.some(r => !r.reportSaved || !r.reportId)) throw new Error("Invalid report history.");
+      if (history.snapshot && !complete(validateSnapshot(history.snapshot))) throw new Error("Invalid baseline.");
+      return history;
     }
-    const result = compareWalletSnapshots(previous, current);
+    if (value.version !== 1) throw new Error("Unsupported history version.");
+    // Version 1 is handled together with equivalent noncanonical scope files below.
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  let names: string[];
+  try { names = fs.readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") names = []; else throw error; }
+  if (names.length > 2000) throw new Error("Too many history scopes.");
+  const matches: Snapshot[] = [];
+  for (const name of names) {
+    const value = readFile(path.join(directory, name)) as { version?: number; scope?: string };
+    if (value.version !== 1) continue;
+    const stored = storedSchema.parse(value);
+    const oldScope = JSON.parse(stored.scope);
+    if (oldScope.version !== 1 || oldScope.includeZero !== true || oldScope.maxItems !== 200) throw new Error("Invalid legacy scope.");
+    if (canonicalScope(oldScope) === scope) matches.push(validateSnapshot(stored.snapshot));
+  }
+  // Never guess between histories previously split by token/address formatting.
+  if (matches.length > 1) throw new Error("Multiple equivalent legacy baselines; reconcile before capture.");
+  if (matches[0] && !complete(matches[0])) throw new Error("Invalid legacy baseline.");
+  return { version: 2, scope, snapshot: matches[0] ?? null, reports: [] };
+}
+
+/** Read an immutable committed report without RPC, locks or baseline mutation. */
+export async function getWalletReport(input: WalletReportInput, runtime: ToolRuntime = createDefaultRuntime(), directory = DEFAULT_STORE) {
+  const { reportId } = walletReportInputSchema.parse(input);
+  runtime.signal?.throwIfAborted();
+  const report = readHistory(directory, scopeFor(runtime)).reports.find(report => report.reportId === reportId);
+  if (!report) throw new HistoryError("REPORT_NOT_FOUND");
+  return report;
+}
+
+/** Commit report and baseline in one rename. The client owns the retry ID before any RPC. */
+export async function getWalletChanges(
+  runtime: ToolRuntime,
+  directory = DEFAULT_STORE,
+  readSnapshot: () => Promise<unknown> = () => getWalletSnapshot({ includeZero: true, maxItems: 200 }, runtime),
+  input: WalletChangesInput
+) {
+  const { requestId } = walletChangesInputSchema.parse(input);
+  const scope = scopeFor(runtime);
+  runtime.signal?.throwIfAborted();
+  const replay = readHistory(directory, scope).reports.find(report => report.reportId === requestId);
+  if (replay) return replay;
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const file = historyPath(directory, scope);
+  const lock = file.replace(/\.json$/, ".lock");
+  let fd: number;
+  try { fd = fs.openSync(lock, "wx", 0o600); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new HistoryError("HISTORY_BUSY");
+    throw error;
+  }
+  const temp = `${file}.${randomUUID()}.tmp`;
+  try {
+    const history = readHistory(directory, scope);
+    const replay = history.reports.find(report => report.reportId === requestId);
+    if (replay) return replay;
+    if (history.reports.length >= 100) throw new HistoryError("HISTORY_FULL");
+    const current = validateSnapshot(await readSnapshot());
     runtime.signal?.throwIfAborted();
-    if (complete(current)) {
-      const body = JSON.stringify({ version: 1, scope, snapshot: current });
-      if (Buffer.byteLength(body) > 4_000_000) throw new Error("Snapshot exceeds storage limit.");
-      fs.writeFileSync(temp, body, { flag: "wx", mode: 0o600 });
-      fs.renameSync(temp, file);
-      result.baselineSaved = true;
-    }
-    return result;
+    if (current.rewards.wallet !== runtime.cfg.walletAddress.toLowerCase() ||
+        JSON.stringify(ids(current.rewards.configuredTokenIds)) !== JSON.stringify(ids(runtime.cfg.veNftTokenIds)) ||
+        Object.entries(runtime.cfg.contracts).some(([key, value]) => current.protocol.contracts[key as keyof Snapshot["protocol"]["contracts"]] !== value.toLowerCase())) throw new Error("Snapshot scope mismatch.");
+    const report = compareWalletSnapshots(history.snapshot, current);
+    report.reportId = requestId;
+    report.reportSaved = true;
+    report.baselineSaved = complete(current);
+    const body = JSON.stringify({ version: 2, scope, snapshot: complete(current) ? current : history.snapshot, reports: [...history.reports, report] });
+    if (Buffer.byteLength(body) > MAX_BYTES) throw new HistoryError("HISTORY_FULL");
+    fs.writeFileSync(temp, body, { flag: "wx", mode: 0o600 });
+    const tempFd = fs.openSync(temp, "r");
+    try { fs.fsyncSync(tempFd); } finally { fs.closeSync(tempFd); }
+    runtime.signal?.throwIfAborted();
+    fs.renameSync(temp, file);
+    return report;
   } finally {
     fs.closeSync(fd);
     fs.rmSync(temp, { force: true });

@@ -14,10 +14,11 @@ import {
 
 import { walletSnapshotSchema, poolComparisonSchema, poolComparisonInputSchema } from "./schema.js";
 
-import { getWalletChanges, walletChangesSchema } from "./changes.js";
+import { getWalletChanges, getWalletReport, walletChangesSchema, walletChangesInputSchema, walletReportInputSchema, HistoryError, type WalletChangesInput, type WalletReportInput } from "./changes.js";
 
 export type AeroMcpServices = {
-  walletChanges?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
+  walletReport?: (input: WalletReportInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
+  walletChanges?: (signal: AbortSignal, input: WalletChangesInput) => Promise<Record<string, unknown>>;
   poolComparison?: (input: PoolComparisonInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
   walletSnapshot?: (input: WalletRewardsInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
   protocolStatus: (signal: AbortSignal) => Promise<Record<string, unknown>>;
@@ -49,8 +50,11 @@ function result(value: Record<string, unknown>) {
   };
 }
 
-function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE") {
+function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL") {
   const descriptions = {
+    HISTORY_BUSY: "Another capture holds this scope lock. Retry with the SAME requestId after it finishes. After a crash, inspect the local lock before recovery.",
+    REPORT_NOT_FOUND: "No committed report with this ID exists in the configured scope.",
+    HISTORY_FULL: "History reached its retention limit. Export and archive it locally before starting a new history; existing reports remain readable.",
     READ_FAILED: "Read could not be verified. Check local configuration and RPC availability.",
     BUSY: "Two reads are already active. Retry after one finishes.",
     CANCELLED: "Read cancelled.",
@@ -63,7 +67,8 @@ function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE") {
 }
 
 export function createAeroMcpServer(services: AeroMcpServices = {
-  walletChanges: (signal) => getWalletChanges(createDefaultRuntime(signal)),
+  walletChanges: (signal, input) => getWalletChanges(createDefaultRuntime(signal), undefined, undefined, input),
+  walletReport: (input, signal) => getWalletReport(input, createDefaultRuntime(signal)),
   poolComparison: (input, signal) => getPoolComparison(input, createDefaultRuntime(signal)),
   walletSnapshot: (input, signal) => getWalletSnapshot(input, createDefaultRuntime(signal)),
   protocolStatus: (signal) => getProtocolStatus(createDefaultRuntime(signal)),
@@ -85,7 +90,8 @@ export function createAeroMcpServer(services: AeroMcpServices = {
       const value = await read(signal);
       signal.throwIfAborted();
       return result(value);
-    } catch {
+    } catch (error) {
+      if (error instanceof HistoryError && !signal.aborted) return failure(error.code);
       // Never echo config parser excerpts, provider text or local paths to a host.
       return failure(requestSignal.aborted ? "CANCELLED" : deadline.signal.aborted ? "DEADLINE" : "READ_FAILED");
     } finally {
@@ -94,14 +100,15 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.1.0" },
+    { name: "aerodrome-readonly", version: "0.1.1" },
     {
       instructions:
-        "Base evidence. For what changed, call aerodrome_wallet_changes once: it updates a local baseline. " +
+        "Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +
+        "Read it again with aerodrome_wallet_report and reportId=requestId, without RPC or baseline updates. A new UUID starts a new comparison. " +
         "For current wallet state use aerodrome_wallet_snapshot. Compare explicit pool addresses with aerodrome_compare_pools. " +
         "Preserve PARTIAL and coverage limits; missing is not zero, reward decreases do not prove income, weights are not yield. " +
         "Report the block interval, changed and unavailable sections, and epoch changes. No signing, broadcasting or profitability proof. " +
-        "Do not repeat wallet_changes merely to format an answer: another call changes the comparison baseline. " +
+        "Never generate a new requestId merely to reformat an answer or recover a lost response. " +
         "BASELINE_CREATED means there is no earlier comparison; zero changes only covers successfully compared fields. " +
         "Use protocol_status for protocol-only questions. Pool comparison is current-state only, not a history of arbitrary selected pools."
     }
@@ -181,12 +188,22 @@ export function createAeroMcpServer(services: AeroMcpServices = {
 
   server.registerTool("aerodrome_wallet_changes", {
     title: "Wallet changes since last complete snapshot",
-    description: "Read a new configured-wallet snapshot and compare against a private local baseline. First complete call creates baseline; later complete calls replace it atomically. Partial reads preserve the previous baseline. This tool writes local history but never changes blockchain state. Missing reward rows are unknown, not zero or proof of claims.",
-    inputSchema: z.strictObject({}), outputSchema: walletChangesSchema,
-    annotations: { ...readOnlyAnnotations, readOnlyHint: false, idempotentHint: false }
-  }, async (_input, ctx) => execute(ctx.mcpReq.signal, async signal => {
+    description: "Capture a new configured-wallet comparison using a caller-generated UUID requestId. Reuse the SAME ID for retries: returns the saved report without RPC. A new ID advances the baseline only for a complete snapshot. Report and baseline commit atomically; partial reports are saved without replacing the baseline. This tool writes local history but never changes blockchain state. Missing reward rows are unknown, not zero or proof of claims.",
+    inputSchema: walletChangesInputSchema, outputSchema: walletChangesSchema,
+    annotations: { ...readOnlyAnnotations, readOnlyHint: false, idempotentHint: true }
+  }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
     if (!services.walletChanges) throw new Error("Changes service unavailable.");
-    return walletChangesSchema.parse(await services.walletChanges(signal));
+    return walletChangesSchema.parse(await services.walletChanges(signal, input));
+  }));
+
+  server.registerTool("aerodrome_wallet_report", {
+    title: "Read a saved wallet change report",
+    description: "Retrieve a committed report by reportId (the original requestId) within the configured wallet scope. No RPC, capture or baseline change. Available after restart and while another capture is running.",
+    inputSchema: walletReportInputSchema, outputSchema: walletChangesSchema,
+    annotations: { ...readOnlyAnnotations, openWorldHint: false }
+  }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
+    if (!services.walletReport) throw new Error("Report service unavailable.");
+    return walletChangesSchema.parse(await services.walletReport(input, signal));
   }));
 
   return server;
