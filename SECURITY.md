@@ -4,6 +4,6 @@ This is an experimental read-only blockchain integration, not a wallet or tradin
 
 This source release has local regression checks, not an independent security audit. Reviews of an earlier parent project must not be presented as an audit of this repository.
 
-Treat token metadata and provider responses as untrusted. Preserve partial coverage and failure states. Never paste credentials or private wallet history into an issue. If a future public repository enables private vulnerability reporting, use that channel for sensitive reports; no reporting URL is advertised before publication.
+Treat token metadata and provider responses as untrusted. Preserve partial coverage and failure states. Never paste credentials or private wallet history into an issue. Use GitHub private vulnerability reporting if it is enabled for this repository; do not put sensitive reports or private data into public issues. Availability of a private reporting channel has not been verified for this release.
 
 If a local baseline is corrupted or locked, stop and inspect it. Do not delete evidence or bypass a lock while another process might be writing. Unexpected RPC/config errors return a bounded MCP error instead of private details.

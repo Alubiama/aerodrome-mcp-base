@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { walletAssetsSchema } from "./assets-schema.js";
 
 const uint = z.string().regex(/^\d+$/);
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
@@ -38,7 +39,7 @@ const rewards = z.strictObject({
 
 export const walletSnapshotSchema = z.strictObject({
   ...common, status: z.enum(["VERIFIED_BOUNDED_SCOPE", "PARTIAL_BOUNDED_SCOPE"]),
-  protocol, voting, rewards,
+  protocol, voting, rewards, assets: walletAssetsSchema.optional(),
   coverage: z.strictObject({ scope: z.string(), consistency: z.string(), historicalRewards: z.string(), pricing: z.string() })
 });
 

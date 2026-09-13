@@ -18,16 +18,22 @@ export const walletChangesSchema = z.strictObject({
   reportId: z.uuid().nullable(), reportSaved: z.boolean(),
   baselineSaved: z.boolean(), epochChanged: z.boolean().nullable(),
   changes: z.array(z.strictObject({
-    section: z.enum(["protocol", "voting", "rewards"]), key: z.string(),
+    section: z.enum(["protocol", "voting", "rewards", "balances", "locks"]), key: z.string(),
     kind: z.enum(["CHANGED", "APPEARED", "NO_LONGER_OBSERVED"]),
     before: scalar, after: scalar, deltaRaw: z.string().regex(/^-?\d+$/).nullable()
   })),
   findings: z.array(findingSchema).default([]),
-  unavailableSections: z.array(z.enum(["voting", "rewards"])),
+  unavailableSections: z.array(z.enum(["voting", "rewards", "balances", "locks"])),
+  initializedSections: z.array(z.enum(["balances", "locks"])).optional(),
   warnings: z.array(z.string())
 });
 const storedSchema = z.strictObject({ version: z.literal(1), scope: z.string(), snapshot: walletSnapshotSchema });
 const DEFAULT_STORE = fileURLToPath(new URL("../../.snapshot-history/", import.meta.url));
+export function historyDirectory() {
+  const override = process.env.AERODROME_HISTORY_DIR;
+  if (override !== undefined && !path.isAbsolute(override)) throw new Error("AERODROME_HISTORY_DIR must be an absolute path.");
+  return override ?? DEFAULT_STORE;
+}
 
 const ids = (values: string[]) => [...new Set(values.map(value => BigInt(value).toString()))].sort();
 const addresses = (values: string[]) => [...new Set(values.map(value => value.toLowerCase()))].sort();
@@ -37,6 +43,12 @@ function validateSnapshot(value: unknown): Snapshot {
   const snapshot = walletSnapshotSchema.parse(value);
   for (const section of [snapshot.protocol, snapshot.voting, snapshot.rewards]) {
     if (JSON.stringify(section.observation) !== JSON.stringify(snapshot.observation)) throw new Error("Inconsistent snapshot observations.");
+  }
+  if (snapshot.assets) {
+    if (JSON.stringify(snapshot.assets.observation) !== JSON.stringify(snapshot.observation) || snapshot.assets.wallet.toLowerCase() !== snapshot.rewards.wallet.toLowerCase()) throw new Error("Invalid asset snapshot identity.");
+    if (JSON.stringify(ids(snapshot.assets.locks.map(row => row.tokenId))) !== JSON.stringify(ids(snapshot.rewards.configuredTokenIds))) throw new Error("Invalid lock scope.");
+    for (const row of snapshot.assets.locks) row.tokenId = BigInt(row.tokenId).toString();
+    if (new Set(snapshot.assets.liquidBalances.map(row => row.token?.toLowerCase() ?? "native")).size !== snapshot.assets.liquidBalances.length || new Set(snapshot.assets.locks.map(row => BigInt(row.tokenId).toString())).size !== snapshot.assets.locks.length) throw new Error("Duplicate asset evidence.");
   }
   snapshot.rewards.configuredTokenIds = ids(snapshot.rewards.configuredTokenIds);
   snapshot.rewards.wallet = snapshot.rewards.wallet.toLowerCase();
@@ -50,9 +62,10 @@ function validateSnapshot(value: unknown): Snapshot {
   return snapshot;
 }
 function complete(snapshot: Snapshot) {
+  if (snapshot.assets && (snapshot.assets.balancesStatus !== "VERIFIED_BOUNDED_SCOPE" || snapshot.assets.locksStatus !== "VERIFIED_BOUNDED_SCOPE")) return false;
   return snapshot.status === "VERIFIED_BOUNDED_SCOPE" && snapshot.voting.status === "VERIFIED_POINT_IN_TIME" && snapshot.rewards.status === "VERIFIED_BOUNDED_SCOPE";
 }
-function fields(snapshot: Snapshot, section: "protocol" | "voting" | "rewards") {
+function fields(snapshot: Snapshot, section: "protocol" | "voting" | "rewards" | "balances" | "locks") {
   const result = new Map<string, string | boolean | null>();
   const add = (key: string, value: string | boolean | null) => {
     if (result.has(key)) throw new Error("Duplicate snapshot evidence.");
@@ -73,6 +86,17 @@ function fields(snapshot: Snapshot, section: "protocol" | "voting" | "rewards") 
     for (const row of snapshot.rewards.votingRewards) add(`veNFT:${row.tokenId}/pool:${row.pool.toLowerCase()}/${row.type}:${row.rewardContract.toLowerCase()}/token:${row.token.toLowerCase()}/amountRaw`, row.amountRaw);
     for (const row of snapshot.rewards.gaugeRewards) add(`gauge:${row.gauge.toLowerCase()}/token:${row.token.toLowerCase()}/amountRaw`, row.amountRaw);
   }
+  if (section === "balances" && snapshot.assets) {
+    for (const row of snapshot.assets.liquidBalances) add(`token:${row.token?.toLowerCase() ?? "native"}/amountRaw`, row.amountRaw);
+  }
+  if (section === "locks" && snapshot.assets) {
+    for (const row of snapshot.assets.locks) {
+      for (const key of ["owner", "status", "token", "principalRaw", "permanent", "unlockAt"] as const) {
+        const value = row[key];
+        add(`veNFT:${row.tokenId}/${key}`, typeof value === "string" && (key === "owner" || key === "token") ? value.toLowerCase() : value);
+      }
+    }
+  }
   return result;
 }
 
@@ -87,31 +111,38 @@ export function compareWalletSnapshots(previous: Snapshot | null, current: Snaps
     if (BigInt(current.observation.blockNumber) < BigInt(previous.observation.blockNumber)) throw new Error("Snapshot is older than baseline.");
     if (current.observation.blockNumber === previous.observation.blockNumber && current.observation.blockHash !== previous.observation.blockHash) throw new Error("Baseline block hash changed.");
   }
-  const unavailableSections: ("voting" | "rewards")[] = [];
+  const unavailableSections: ("voting" | "rewards" | "balances" | "locks")[] = [];
+  if (current.assets?.balancesStatus.startsWith("PARTIAL")) unavailableSections.push("balances");
+  if (current.assets?.locksStatus.startsWith("PARTIAL")) unavailableSections.push("locks");
+  if (previous?.assets && !current.assets) unavailableSections.push("balances", "locks");
+  const initializedSections = current.assets && !previous?.assets && complete(current) ? ["balances", "locks"] : [];
   if (current.voting.status !== "VERIFIED_POINT_IN_TIME") unavailableSections.push("voting");
   if (current.rewards.status !== "VERIFIED_BOUNDED_SCOPE") unavailableSections.push("rewards");
   const changes: z.infer<typeof walletChangesSchema>["changes"] = [];
-  for (const section of ["protocol", "voting", "rewards"] as const) {
+  for (const section of ["protocol", "voting", "rewards", "balances", "locks"] as const) {
+    if ((section === "balances" || section === "locks") && (!previous?.assets || !current.assets)) continue;
     const after = fields(current, section);
-    if (!previous || unavailableSections.includes(section as "voting" | "rewards")) continue;
+    if (!previous || unavailableSections.includes(section as "voting" | "rewards" | "balances" | "locks")) continue;
     const before = fields(previous, section);
     for (const key of new Set([...before.keys(), ...after.keys()])) {
       const a = before.get(key) ?? null;
       const b = after.get(key) ?? null;
       if (before.has(key) === after.has(key) && a === b) continue;
+      const lockTokenChanged = section === "locks" && key.endsWith("/principalRaw") &&
+        before.get(key.replace(/principalRaw$/, "token")) !== after.get(key.replace(/principalRaw$/, "token"));
       changes.push({ section, key,
         kind: !before.has(key) ? "APPEARED" : !after.has(key) ? "NO_LONGER_OBSERVED" : "CHANGED",
         before: a, after: b,
-        deltaRaw: /Raw$|poolCount$|maxPoolsPerVote$/.test(key) && typeof a === "string" && /^\d+$/.test(a) && typeof b === "string" && /^\d+$/.test(b) ? (BigInt(b) - BigInt(a)).toString() : null
+        deltaRaw: !lockTokenChanged && /Raw$|poolCount$|maxPoolsPerVote$/.test(key) && typeof a === "string" && /^\d+$/.test(a) && typeof b === "string" && /^\d+$/.test(b) ? (BigInt(b) - BigInt(a)).toString() : null
       });
     }
   }
   return walletChangesSchema.parse({
-    status: !complete(current) ? "PARTIAL" : previous ? "COMPARED" : "BASELINE_CREATED",
+    status: !complete(current) || unavailableSections.length > 0 ? "PARTIAL" : previous ? "COMPARED" : "BASELINE_CREATED",
     chainId: 8453, blockchainReadOnly: true, observation: current.observation,
     previousObservation: previous?.observation ?? null, reportId: null, reportSaved: false, baselineSaved: false,
     epochChanged: previous ? previous.protocol.epoch.start !== current.protocol.epoch.start : null,
-    changes, unavailableSections, findings: explainChanges(previous, current, changes, unavailableSections),
+    changes, unavailableSections, initializedSections, findings: explainChanges(previous, current, changes, unavailableSections),
     warnings: [...current.warnings,
       "Only observed current-scope values are compared. Missing rows are unknown, not zero. A reward decrease does not prove a claim or income.",
       ...(!complete(current) ? ["Partial snapshot did not replace the last complete baseline; unavailable sections were not compared."] : [])]
@@ -133,7 +164,7 @@ const storedReportSchema = z.union([
   return { ...evidence, message: renderLegacyFinding(evidence, report.changes.find(change => change.key === evidence.key)) };
 }) }));
 const historySchema = z.strictObject({
-  version: z.literal(2), scope: z.string(), snapshot: walletSnapshotSchema.nullable(),
+  version: z.union([z.literal(2), z.literal(3)]), scope: z.string(), snapshot: walletSnapshotSchema.nullable(),
   reports: z.array(storedReportSchema).max(100)
 });
 type History = z.infer<typeof historySchema>;
@@ -148,6 +179,15 @@ function scopeFor(runtime: ToolRuntime) {
 function canonicalScope(value: { wallet: string; ids: string[]; gauges: string[]; contracts: Record<string, string> }) {
   return JSON.stringify({ version: 1, wallet: value.wallet.toLowerCase(), ids: ids(value.ids),
     gauges: addresses(value.gauges), contracts: contracts(value.contracts), includeZero: true, maxItems: 200 });
+}
+// The private v1 helper included unused Slipstream deployment metadata in its
+// scope. Only these three contracts participate in this snapshot reader.
+// Accept that known legacy field, but never drop unknown contract keys silently.
+function legacyCoreContracts(value: unknown) {
+  const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
+  const parsed = z.strictObject({ voter: address, router: address, defaultFactory: address,
+    slipstream: z.record(z.string(), z.unknown()).optional() }).parse(value);
+  return { voter: parsed.voter, router: parsed.router, defaultFactory: parsed.defaultFactory };
 }
 function historyPath(directory: string, scope: string) {
   return path.join(directory, `${createHash("sha256").update(scope).digest("hex")}.json`);
@@ -164,7 +204,7 @@ function readHistory(directory: string, scope: string): History {
   const file = historyPath(directory, scope);
   try {
     const value = readFile(file) as { version?: number };
-    if (value.version === 2) {
+    if (value.version === 2 || value.version === 3) {
       const history = historySchema.parse(value);
       if (history.scope !== scope || new Set(history.reports.map(r => r.reportId)).size !== history.reports.length ||
           history.reports.some(r => !r.reportSaved || !r.reportId)) throw new Error("Invalid report history.");
@@ -185,7 +225,14 @@ function readHistory(directory: string, scope: string): History {
     const stored = storedSchema.parse(value);
     const oldScope = JSON.parse(stored.scope);
     if (oldScope.version !== 1 || oldScope.includeZero !== true || oldScope.maxItems !== 200) throw new Error("Invalid legacy scope.");
-    if (canonicalScope(oldScope) === scope) matches.push(validateSnapshot(stored.snapshot));
+    const core = legacyCoreContracts(oldScope.contracts);
+    if (canonicalScope({ ...oldScope, contracts: core }) === scope) {
+      const snapshot = validateSnapshot(stored.snapshot);
+      if (Object.entries(core).some(([key, value]) => snapshot.protocol.contracts[key as keyof Snapshot["protocol"]["contracts"]] !== value.toLowerCase())) {
+        throw new Error("Invalid legacy snapshot contract identity.");
+      }
+      matches.push(snapshot);
+    }
   }
   // Never guess between histories previously split by token/address formatting.
   if (matches.length > 1) throw new Error("Multiple equivalent legacy baselines; reconcile before capture.");
@@ -194,7 +241,7 @@ function readHistory(directory: string, scope: string): History {
 }
 
 /** Read an immutable committed report without RPC, locks or baseline mutation. */
-export async function getWalletReport(input: WalletReportInput, runtime: ToolRuntime = createDefaultRuntime(), directory = DEFAULT_STORE) {
+export async function getWalletReport(input: WalletReportInput, runtime: ToolRuntime = createDefaultRuntime(), directory = historyDirectory()) {
   const { reportId } = walletReportInputSchema.parse(input);
   runtime.signal?.throwIfAborted();
   const report = readHistory(directory, scopeFor(runtime)).reports.find(report => report.reportId === reportId);
@@ -205,7 +252,7 @@ export async function getWalletReport(input: WalletReportInput, runtime: ToolRun
 /** Commit report and baseline in one rename. The client owns the retry ID before any RPC. */
 export async function getWalletChanges(
   runtime: ToolRuntime,
-  directory = DEFAULT_STORE,
+  directory = historyDirectory(),
   readSnapshot: () => Promise<unknown> = () => getWalletSnapshot({ includeZero: true, maxItems: 200 }, runtime),
   input: WalletChangesInput
 ) {
@@ -234,11 +281,12 @@ export async function getWalletChanges(
     if (current.rewards.wallet !== walletAddress(runtime.cfg).toLowerCase() ||
         JSON.stringify(ids(current.rewards.configuredTokenIds)) !== JSON.stringify(ids(runtime.cfg.veNftTokenIds)) ||
         Object.entries(runtime.cfg.contracts).some(([key, value]) => current.protocol.contracts[key as keyof Snapshot["protocol"]["contracts"]] !== value.toLowerCase())) throw new Error("Snapshot scope mismatch.");
+    if (history.snapshot?.assets && !current.assets) throw new Error("Snapshot asset coverage regressed.");
     const report = compareWalletSnapshots(history.snapshot, current);
     report.reportId = requestId;
     report.reportSaved = true;
     report.baselineSaved = complete(current);
-    const body = JSON.stringify({ version: 2, scope, snapshot: complete(current) ? current : history.snapshot, reports: [...history.reports, report] });
+    const body = JSON.stringify({ version: 3, scope, snapshot: complete(current) ? current : history.snapshot, reports: [...history.reports, report] });
     if (Buffer.byteLength(body) > MAX_BYTES) throw new HistoryError("HISTORY_FULL");
     fs.writeFileSync(temp, body, { flag: "wx", mode: 0o600 });
     const tempFd = fs.openSync(temp, "r");

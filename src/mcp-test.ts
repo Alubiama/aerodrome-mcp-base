@@ -7,6 +7,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { AppConfig } from "./types.js";
 import { getPoolComparison, getWalletSnapshot, getProtocolStatus, getVotingPosition, getWalletRewards, unixSecondsToIso } from "./mcp/data.js";
+import { testAssetHistory } from "./asset-history-test.js";
 import { createAeroMcpServer } from "./mcp/server.js";
 import { poolComparisonSchema, poolComparisonInputSchema, walletSnapshotSchema } from "./mcp/schema.js";
 import { testWalletOverview } from "./overview-test.js";
@@ -378,6 +379,7 @@ async function testSnapshot() {
         cfg: { ...testConfig(), gaugeAddresses: [GAUGE] },
         client: {
           getChainId: base.getChainId,
+          getBalance: async (call: any) => { assert.equal(call.blockNumber, 123n); return 1000000000000000000n; },
           getBlock: async (input: { blockTag?: string; blockNumber?: bigint }) => {
             if (input.blockTag === "latest") latestReads++;
             else { assert.equal(input.blockNumber, 123n); hashChecks++; }
@@ -386,6 +388,14 @@ async function testSnapshot() {
           readContract: async (call: { address: string; functionName: string; blockNumber?: bigint; args?: unknown[] }) => {
             assert.equal(call.blockNumber, 123n, `${call.functionName} must be pinned`);
             calls.push(call.functionName);
+            if (call.functionName === "token") return REWARD_TOKEN;
+            if (call.functionName === "balanceOf") return 100n;
+            if (call.functionName === "escrowType") return 0;
+            if (call.functionName === "locked") return { amount: 100000000000000000000n, end: 2000n, isPermanent: false };
+            if (call.address.toLowerCase() === testConfig().tokens.USDC.toLowerCase()) {
+              if (call.functionName === "symbol") return "USDC";
+              if (call.functionName === "decimals") return 6;
+            }
             if ((options.votingPartial && call.functionName === "votes") || (options.rewardsPartial && call.functionName === "earned")) throw new Error("execution reverted");
             if (["voter", "defaultFactory", "totalWeight", "length", "epochStart", "epochNext", "epochVoteStart", "epochVoteEnd"].includes(call.functionName)) return base.readContract(call);
             if (call.functionName === "lastVoted") return 1500n;
@@ -403,9 +413,12 @@ async function testSnapshot() {
   const value = await getWalletSnapshot({}, test.runtime);
   walletSnapshotSchema.parse(value);
   await testWalletChanges(value, test.runtime.cfg);
+  await testAssetHistory(value, test.runtime.cfg);
   assert.equal(value.status, "VERIFIED_BOUNDED_SCOPE");
   assert.ok(value.warnings.length > 0, "Coverage warnings alone are not partial failures");
   assert.deepEqual(test.counts(), { latestReads: 1, hashChecks: 1 });
+  assert.equal(test.calls.filter(name => name === "ownerOf").length, 1, "One pinned owner read serves voting, rewards and locks");
+  assert.equal(test.calls.filter(name => name === "totalWeight").length, 1, "Repeated protocol reads are shared within this snapshot");
   for (const section of [value.protocol, value.voting, value.rewards]) assert.deepEqual(section.observation, value.observation);
   assert.ok(test.calls.includes("symbol") && test.calls.includes("decimals"), "Metadata cache must not bypass pinned reads");
   const transferredRuntime = snapshotRuntime({ transferred: true });
@@ -582,7 +595,10 @@ async function main() {
   const listed = await client.listTools();
   assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
     "aerodrome_compare_pools",
+    "aerodrome_pool_directory",
     "aerodrome_protocol_status",
+    "aerodrome_reward_plan",
+    "aerodrome_voting_incentives",
     "aerodrome_voting_position",
     "aerodrome_wallet_changes",
     "aerodrome_wallet_overview",
@@ -666,8 +682,8 @@ async function main() {
   const stdioTools = await stdioClient.listTools();
   assert.deepEqual(stdioTools.tools.map((tool) => tool.name).sort(), listed.tools.map((tool) => tool.name).sort());
   await stdioClient.close();
-  assert.match(childStderr, /Aerodrome read-only MCP v0\.1 running on stdio/);
-  console.log("MCP tests passed: data safety, Base chain checks, 8 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
+  assert.match(childStderr, /Aerodrome read-only MCP running on stdio/);
+  console.log("MCP tests passed: data safety, Base chain checks, 11 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
 }
 
 main().catch((error) => {

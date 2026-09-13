@@ -1,4 +1,6 @@
 import { formatUnits, getAddress, type Address } from "viem";
+import { getWalletAssets } from "./assets.js";
+import { createPinnedReadCache } from "../pinned-read-cache.js";
 import { gaugeAbi, routerAbi, veAbi, voterAbi, votingRewardAbi } from "../abi.js";
 import { makeClient } from "../client.js";
 import {
@@ -588,29 +590,30 @@ export async function getWalletSnapshot(
   if (!obs.value.blockHash || !/^0x[0-9a-fA-F]{64}$/.test(obs.value.blockHash)) {
     throw new Error("Snapshot requires a valid block hash.");
   }
-  const pinned = { ...runtime, pinnedObservation: obs };
+  const pinned = { ...runtime, client: createPinnedReadCache(runtime.client, obs.rawBlockNumber, runtime.signal), pinnedObservation: obs };
   const protocol = await getProtocolStatus(pinned);
   const voting = await getVotingPosition({}, pinned);
   const rewards = await getWalletRewards(input, pinned);
+  const assets = await getWalletAssets(pinned, protocol);
   const finalBlock = await runtime.client.getBlock({ blockNumber: obs.rawBlockNumber });
   runtime.signal?.throwIfAborted();
   if (finalBlock.number !== obs.rawBlockNumber || finalBlock.hash !== obs.value.blockHash) {
     throw new Error("Snapshot block changed during reads; retry.");
   }
   return {
-    status: voting.status.startsWith("PARTIAL") || rewards.status.startsWith("PARTIAL")
+    status: voting.status.startsWith("PARTIAL") || rewards.status.startsWith("PARTIAL") || assets.balancesStatus.startsWith("PARTIAL") || assets.locksStatus.startsWith("PARTIAL")
       ? "PARTIAL_BOUNDED_SCOPE" : "VERIFIED_BOUNDED_SCOPE",
     readOnly: true,
     chainId: 8453,
     observation: obs.value,
-    protocol, voting, rewards,
+    protocol, voting, rewards, assets,
     coverage: {
       scope: "configured wallet, veNFT current votes and explicitly configured LP gauges at one Base block",
       consistency: "block-number pinned reads with block hash rechecked after completion; RPC trust required",
       historicalRewards: "not scanned; zero current rewards does not prove no historical claimable rewards",
       pricing: "not included"
     },
-    warnings: [...new Set([...protocol.warnings, ...voting.warnings, ...rewards.warnings])]
+    warnings: [...new Set([...protocol.warnings, ...voting.warnings, ...rewards.warnings, ...assets.warnings])]
   };
 }
 

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAddress, isAddress, type Address } from "viem";
 import * as z from "zod/v4";
@@ -11,13 +12,22 @@ export const configSchema = z.strictObject({
  gaugeAddresses: z.array(z.string().refine(value => isAddress(value) && value.toLowerCase() !== ZERO)).max(200).default([])
 });
 export function loadConfig(): AppConfig {
- const filename = fileURLToPath(new URL("../config.json", import.meta.url));
+ const override = process.env.AERODROME_CONFIG_PATH;
+ if (override !== undefined && !path.isAbsolute(override)) throw new Error("AERODROME_CONFIG_PATH must be an absolute path.");
+ const filename = override ?? fileURLToPath(new URL("../config.json", import.meta.url));
  let raw: unknown = {};
  try {
    if (fs.statSync(filename).size > 64000) throw new Error("Configuration too large.");
    raw = JSON.parse(fs.readFileSync(filename, "utf8"));
- } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
- const input = configSchema.parse(raw);
+ } catch (error) {
+   if ((error as NodeJS.ErrnoException).code === "ENOENT" && override === undefined) raw = {};
+   else if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("Configured configuration file is unavailable.");
+   else if (error instanceof SyntaxError) throw new Error("Configuration is invalid.");
+   else if (error instanceof Error && error.message === "Configuration too large.") throw error;
+   else throw new Error("Configuration file is unavailable.");
+ }
+ let input: z.infer<typeof configSchema>;
+ try { input = configSchema.parse(raw); } catch { throw new Error("Configuration is invalid."); }
  return { ...publicConfig(), ...input, walletAddress: input.walletAddress ? getAddress(input.walletAddress) : undefined,
    veNftTokenIds: input.veNftTokenIds.map(value => BigInt(value).toString()), gaugeAddresses: uniqAddresses(input.gaugeAddresses.map(value => getAddress(value))) };
 }

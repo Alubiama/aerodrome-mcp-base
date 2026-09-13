@@ -1,6 +1,6 @@
 {
   "name": "aerodrome-mcp-base",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Read-only Aerodrome evidence and local wallet change tracking on Base.",
   "license": "MIT",
@@ -10,9 +10,10 @@
   },
   "scripts": {
     "start": "node --import tsx src/mcp/index.ts",
-    "test": "node --import tsx src/mcp-test.ts",
+    "test": "node --import tsx src/mcp-test.ts && node --import tsx src/pools-test.ts && node --import tsx src/incentives-test.ts && node --import tsx src/assets-test.ts && node --import tsx src/pinned-read-cache-test.ts && node --import tsx src/token-market-test.ts && node --import tsx src/reward-plan-test.ts && node --import tsx src/config-path-test.ts",
     "typecheck": "tsc --noEmit",
-    "demo": "node --import tsx src/demo.ts"
+    "demo": "node --import tsx src/demo.ts",
+    "build": "tsc"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
@@ -24,5 +25,14 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "files": [
+    "src/",
+    "tsconfig.json",
+    "config.example.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md"
+  ]
 }

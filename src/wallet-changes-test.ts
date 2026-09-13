@@ -13,6 +13,7 @@ import { compareWalletSnapshots, getWalletChanges, getWalletReport, walletChange
 
 export async function testWalletChanges(value: unknown, cfg: AppConfig) {
   const baseline = walletSnapshotSchema.parse(value);
+  delete baseline.assets; // Exercise legacy reports independently of added asset history.
   const current = structuredClone(baseline);
   for (const section of [current, current.protocol, current.voting, current.rewards]) section.observation.blockNumber = "124";
   current.voting.positions[0].currentVotingPowerRaw = "9007199254740993999";
@@ -156,6 +157,22 @@ export async function testWalletChanges(value: unknown, cfg: AppConfig) {
     assert.equal(migrated.previousObservation?.blockNumber, "123");
     assert.equal(fs.readFileSync(legacyPath, "utf8"), legacyBody);
     assert.deepEqual(await getWalletChanges({ cfg: aliasCfg, client: {} }, legacyDir, noRPC, { requestId: migratedId }), migrated);
+    const nestedDir = path.join(directory, "legacy-nested");
+    fs.mkdirSync(nestedDir);
+    const nestedScope = JSON.stringify({ ...JSON.parse(oldScope), contracts: {
+      ...cfg.contracts, slipstream: { label: "Legacy unused deployment", additionalDeployments: [] }
+    } });
+    const nestedPath = path.join(nestedDir, `${createHash("sha256").update(nestedScope).digest("hex")}.json`);
+    const nestedBody = JSON.stringify({ version: 1, scope: nestedScope, snapshot: baseline });
+    fs.writeFileSync(nestedPath, nestedBody);
+    assert.equal((await capture(current, randomUUID(), nestedDir)).status, "COMPARED");
+    assert.equal(fs.readFileSync(nestedPath, "utf8"), nestedBody);
+    const mismatchDir = path.join(directory, "legacy-identity-mismatch");
+    fs.mkdirSync(mismatchDir);
+    const wrongSnapshot = structuredClone(baseline);
+    wrongSnapshot.protocol.contracts.voter = "0x0000000000000000000000000000000000000099";
+    fs.writeFileSync(path.join(mismatchDir, path.basename(nestedPath)), JSON.stringify({ version: 1, scope: nestedScope, snapshot: wrongSnapshot }));
+    await assert.rejects(capture(current, randomUUID(), mismatchDir), /contract identity/);
     const mcpDirectory = path.join(directory, "mcp");
     let calls = 0;
     const server = createAeroMcpServer({

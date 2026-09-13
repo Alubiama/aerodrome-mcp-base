@@ -6,7 +6,7 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.2.1**. License: MIT.
+Version: **0.3.0**. License: MIT.
 
 ## Quick start
 
@@ -64,8 +64,12 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 - “Show my current Aerodrome voting positions and bounded rewards.”
 - “Compare the voting weights and gauge status of these pool addresses: …”
 
+Version 0.3.0 exposes 11 tools:
+
 | Tool | Purpose |
 | --- | --- |
+| `aerodrome_pool_directory` | Newest voting-pool registrations, paginated, with pair metadata |
+| `aerodrome_voting_incentives` | Epoch deposits and conditional vote-allocation estimates in reward-token units |
 | `aerodrome_protocol_status` | Official contract identity, block, epoch and protocol weights |
 | `aerodrome_voting_position` | Configured or supplied veNFT voting positions |
 | `aerodrome_wallet_rewards` | Current-vote reward scope and explicitly configured LP gauges |
@@ -74,6 +78,35 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
 | `aerodrome_wallet_changes` | Capture with a UUID `requestId`; retry the same ID to recover the same report |
 | `aerodrome_wallet_report` | Retrieve a saved report by `reportId`, without RPC or baseline changes |
+| `aerodrome_reward_plan` | Bounded retention and direct-USDC quote scenarios for explicit veNFT selections; never executes a trade |
+
+## Discover pools and inspect voting incentives (0.3)
+
+`aerodrome_pool_directory` reads up to 16 registry slots (default 8), newest first. Use `nextBeforeIndex` as the next request's `beforeIndex`; the cursor advances over examined slots, including failed rows. To check registrations since a previous observation, pass its `totalPoolCount` as `sinceIndex`. A first page is not a complete market scan. Registry order means **gauge registration**, not token listing date or pool creation time. Pair token addresses are authoritative within the RPC evidence; symbols are untrusted labels. Missing metadata stays partial.
+
+```json
+{"name":"aerodrome_pool_directory","arguments":{"limit":8}}
+```
+
+Use discovered or explicitly chosen addresses in `aerodrome_voting_incentives` (1–8 pools). With no scenario input it returns current-epoch deposited bribes and fees only. Reward-token scans are limited to 8 entries per contract by default (maximum 16); truncation and failed reads remain visible.
+
+For hypothetical full allocation, supply 1–4 normal veNFT `tokenIds`. Current voting power is read on chain; existing balances in each reward contract are subtracted before adding the proposed allocation. Each pool is a separate alternative using all supplied voting power, not simultaneous allocations. This does not establish wallet ownership, eligibility, delegation or transaction success. Non-normal positions or unavailable inputs suppress estimates.
+
+Alternatively, `additionalVoteRaw` models new marginal voting weight and does not remove any existing votes. It is mutually exclusive with `tokenIds`. Raw voting power uses the escrow token's units; do not pass a human-readable token amount as a raw integer.
+
+```json
+{"name":"aerodrome_voting_incentives","arguments":{"pools":["0x0000000000000000000000000000000000000010"],"tokenIds":["1"]}}
+```
+
+The address and ID above are synthetic: replace them with actual discovered values. The response distinguishes deposited amounts from `estimatedRewardRaw` / `estimatedRewardFormatted`. `candidateVoteRaw`, `removedExistingVoteRaw` and `scenarioDenominatorRaw` expose the calculation. Full-allocation estimate per reward token:
+
+```text
+depositedRaw * candidateVoteRaw / (totalSupplyRaw - removedExistingVoteRaw + candidateVoteRaw)
+```
+
+Integer division rounds down. Estimates are in each reward token separately; tokens must not be summed or ranked by raw amounts. Zero deposits now do not imply zero final-epoch rewards. Votes and deposits may change before epoch end. Actual claimable rewards use epoch-end checkpoints, not this current-state scenario. No token prices, USD APR, liquidity/volume ranking or guaranteed payout is provided. Unknown decimals leave formatted values null. Dead gauges remain visible with no estimates.
+
+The source basis is the official [Voter registration logic](https://github.com/aerodrome-finance/contracts/blob/main/contracts/Voter.sol) and [Reward accounting](https://github.com/aerodrome-finance/contracts/blob/main/contracts/rewards/Reward.sol). All RPC reads are pinned to one block, with a final hash recheck and bounded request lifetime.
 
 ## One-address overview
 
@@ -92,7 +125,7 @@ Use your own public address instead of the synthetic example. No manual veNFT ID
 
 `decimalsSource` distinguishes on-chain/canonical units from assumed or unknown units. New reward reads set `amountFormatted=null` if decimals are assumed; the raw amount remains available. Token labels are untrusted display data.
 
-The overview is a fresh read and does not update local history. `wallet_changes` still compares configured veNFT/current-reward scope; it does not yet track liquid-balance or lock-principal history. New reports include `findings`: English explanations with codes, block interval and source links. They describe observations, not inferred deposits, sales or claimed income. Old reports remain retrievable and may have no findings or unit provenance.
+The overview is a fresh read and does not update local history. `wallet_changes` also tracks ETH, the escrow token (AERO), configured USDC, and lock principal/state for the explicitly configured veNFT IDs. These are bounded assets, not all wallet holdings. Newly discovered overview NFTs do not automatically change the history scope. New reports include `findings`: English explanations with codes, block interval and source links. They describe observations, not inferred deposits, sales or claimed income. Old reports remain retrievable and may have no findings or unit provenance.
 
 Protocol basis: the official [VotingEscrow implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/VotingEscrow.sol) and [interface](https://github.com/aerodrome-finance/contracts/blob/main/contracts/interfaces/IVotingEscrow.sol) define owner enumeration, lock tuples and managed escrow types. Runtime reads are pinned to a single Base block and rechecked; these source references are not a substitute for RPC verification.
 
@@ -110,6 +143,16 @@ Use `summary` instead of `summaryRu`, and `findings[].message` instead of `findi
 - Historical vote pools and historical unclaimed rewards are not scanned. Zero current rewards does not prove no historical rewards.
 - Raw amounts are authoritative within the RPC evidence. Token labels are untrusted; unverified decimals are identified and new reads leave their formatted amount null. Legacy reports may contain an older display fallback; retain raw amounts and provenance.
 - Voting weight is not APR. Prices, liquidity, volume and profitability are not calculated. Basis-point shares are rounded down; 0 bps can represent a positive share below 0.01%.
+
+## Balance and lock history (0.3)
+
+Snapshots now include an optional `assets` section so old stored snapshots remain readable. Fresh reads include liquid ETH/AERO/USDC balances, configured lock principal, observed owner, permanence and unlock time at the same block as voting and rewards. Permanent locks use `unlockAt=null`; unsupported managed principal remains unknown.
+
+Within one configured snapshot, identical successful contract reads at its pinned block are reused. The cache is bounded and discarded after the request; later snapshots read fresh data. Failed reads, chain checks and final block-hash verification are not cached. This reduces redundant RPC work but does not guarantee completion during public endpoint delays.
+
+`wallet_changes` uses `balances` and `locks` sections. The first complete observation after a legacy snapshot returns `initializedSections` and `SECTION_BASELINE_CREATED` findings; it emits no inferred deposit or balance/lock delta. A subsequent complete snapshot can report changes. Missing/failed data is not zero. Partial sections are skipped and the last complete baseline is retained, while independently complete sections can still be compared. New values do not establish a transfer, sale, deposit or realized income. Token amounts are kept separate and formatted only with known compatible units.
+
+Fresh captures write history version 3. Existing v1/v2 history and immutable reports remain readable, and report IDs are preserved. Old server versions cannot safely read/write this extended format: restart old clients before capturing into the live history with this build. Reads of saved old reports do not rewrite storage. A fresh snapshot missing asset coverage cannot replace an existing asset-aware baseline.
 
 ## Capture, retry and read again (0.1.1)
 
@@ -141,4 +184,48 @@ RPC trust is required. A block-hash recheck is not a cryptographic proof of corr
 
 `npm test` covers input bounds, partial evidence, block consistency, cancellation, RPC isolation, persistence and real cross-directory stdio startup. `npm run demo` exercises the user scenario through MCP without network calls. Dependencies are locked; install scripts are disabled.
 
-Source and releases: https://github.com/Alubiama/aerodrome-mcp-base . Installation is from source; this is not an npm-published package.
+Source and published releases: https://github.com/Alubiama/aerodrome-mcp-base . Installation is from source; this is not an npm-published package.
+
+## Reward token cards and retention plans (0.3)
+
+`aerodrome_reward_plan` compares 1–3 selected pools as **independent full-allocation scenarios** for 1–4 explicit normal veNFT IDs. It reuses `voting_incentives`; it neither establishes ownership/voting eligibility nor predicts final epoch payouts.
+
+Modes:
+
+- `USDC`: consider conversion of all observed scenario rewards to canonical Base USDC.
+- `HOLD_SELECTED`: retain all units of the exact `preferredTokens` addresses; consider conversion of the rest.
+- `MIXED`: retain `keepBps / 10000` of each selected token's units; consider conversion of the remainder and all unselected tokens. This is not a portfolio percentage in USD. Rounding stays in integer token units; nothing is lost between retain and convert amounts.
+
+Example arguments (replace the public addresses and veNFT IDs with the intended selection):
+
+```json
+{
+  "pools": ["0x0000000000000000000000000000000000000001"],
+  "tokenIds": ["101"],
+  "mode": "MIXED",
+  "preferredTokens": ["0x940181a94A35A4569E4529A3CDfB74e38FD98631"],
+  "keepBps": 2500,
+  "slippageBps": 100,
+  "includeMarket": true,
+  "maxRewardTokens": 4
+}
+```
+
+Preferences are request inputs, not persistent settings. The server never chooses tokens to hold automatically. `includeMarket=true` sends only reward token addresses to the fixed public [Dexscreener API](https://docs.dexscreener.com/api/reference). Wallet addresses, veNFT IDs and research notes are not sent to it. The cards use a separately fetched indexer observation; fetch time is not proof that its price is fresh. The selected observed pair is not an exhaustive liquidity assessment. Prices, volume and project links do not establish token quality or sellability.
+
+USDC quotes read the official [classic Router's getAmountsOut](https://github.com/aerodrome-finance/contracts/blob/main/contracts/Router.sol) at the reward block for two direct routes (stable and volatile, default factory). The greater available output is shown with a slippage-adjusted scenario amount. Missing or failing routes remain unknown; `routeChecksComplete` discloses incomplete route checks. Slipstream, multihop and other exchanges are not searched. Transfer taxes/restrictions, actual claimable balances, gas and claim costs are not simulated. `netUsdcAfterGas` is always null. A quote is not proof that a swap will succeed. Totals cover converted portions only, excluding retained tokens; do not rank different retention policies by USDC output alone. No transaction construction or execution is provided.
+
+Each reward-token card includes market observations and research gaps for team, product, tokenomics, holders, contract control, sell restrictions and demand. The connected assistant can use its web research tools to investigate those topics and provide bounded `researchNotes` with `token`, `topic`, `claim`, `source` (HTTPS) and `checkedAt` (UTC). Prefer primary sources and distinguish project claims from independent corroboration. The MCP never follows those links or promotes claims to verified facts. Claims older than seven days receive `STALE_SOURCE_CLAIM` as a conservative review reminder, not a universal factual expiry; future-dated claims are flagged. Even supplied topics remain unverified. A card has no growth score or x10 prediction.
+
+All missing research is visible. `SCENARIO_ONLY` describes calculation coverage, never safety or investment quality. Market failure is reported on the card without erasing independently read reward evidence. Unknown reward entries and truncated contracts prevent a complete USDC subtotal. Cards are capped at 16 tokens; omitted addresses are explicit. All on-chain reads have cancellation/deadline bounds and a final block-hash check. Nothing is published, traded, signed or written to wallet history by this tool.
+
+## Private SSH hosting
+
+For a small private pilot, an SSH command can carry the existing stdio protocol directly. A public HTTP listener is not required. Run the compiled server as a dedicated unprivileged account, with a root-owned forced-command launcher and an SSH key restricted to that command. Give each future user a separate account, key, configuration and history directory; do not share the pilot identity.
+
+`npm run build` emits JavaScript to `dist/`. Production installs need only the locked production dependencies and Node.js 24+. The launcher can set:
+
+- `AERODROME_CONFIG_PATH`: absolute path to that account's strict wallet configuration. An explicitly selected missing file is an error; it does not silently use public defaults.
+- `AERODROME_HISTORY_DIR`: absolute path to that account's private report directory. Existing local defaults remain unchanged when these variables are absent.
+
+Keep code/runtime immutable to the service account, history private, and credentials outside the repository. A private pilot can restrict one active SSH session per account and cap the Node heap; these are not proof of capacity for public multi-user hosting. Stdio processes start when a client connects and stop when it disconnects. For Codex's command/args setup, see [OpenAI's MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
