@@ -1,6 +1,7 @@
 services:
   - type: web
     name: collect-base
+    branch: collect-render-preview
     runtime: node
     plan: free
     buildCommand: npm ci --include=dev && npm run build
