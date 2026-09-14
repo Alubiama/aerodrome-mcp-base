@@ -9,13 +9,18 @@
     "node": ">=24"
   },
   "scripts": {
+    "web": "node --import tsx src/web-server.ts",
+    "test:web": "node --import tsx src/web-server-test.ts",
+    "test:basket": "node --import tsx src/basket-test.ts",
     "start": "node --import tsx src/mcp/index.ts",
     "test": "node --import tsx src/mcp-test.ts && node --import tsx src/pools-test.ts && node --import tsx src/incentives-test.ts && node --import tsx src/assets-test.ts && node --import tsx src/pinned-read-cache-test.ts && node --import tsx src/token-market-test.ts && node --import tsx src/reward-plan-test.ts && node --import tsx src/config-path-test.ts",
     "typecheck": "tsc --noEmit",
     "demo": "node --import tsx src/demo.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts"
   },
   "dependencies": {
+    "@base-org/account": "2.5.10",
     "@modelcontextprotocol/server": "^2.0.0",
     "viem": "^2.37.0",
     "zod": "^4.6.1"
@@ -28,6 +33,7 @@
   },
   "files": [
     "src/",
+    "web/",
     "tsconfig.json",
     "config.example.json",
     "README.md",

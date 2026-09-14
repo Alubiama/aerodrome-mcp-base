@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {simulationRequest,analyzeBasketSimulation} from './basket-simulation.js';
+const plan:any={wallet:'0x0000000000000000000000000000000000000001',chainId:8453,executable:false,expiresAt:new Date(Date.now()+60000).toISOString(),planId:'test',minimumOutput:'2',calls:[{to:'0x0000000000000000000000000000000000000002',value:'0x0',data:'0x'}]};
+const bal=(n:bigint)=>({status:'0x1',returnData:'0x'+n.toString(16).padStart(64,'0')});
+const ok=()=>[{calls:[bal(1000000n),{status:'0x1',gasUsed:'0x5208'},bal(3100000n)]}];
+const req:any=simulationRequest(plan);assert.equal(req.method,'eth_simulateV1');assert.equal(req.params[0].blockStateCalls[0].calls.length,3);assert.equal(req.params[0].validation,false);assert.equal(req.params[0].blockStateCalls[0].stateOverrides,undefined);
+const got=analyzeBasketSimulation(plan,ok());assert.equal(got.receivedUsdc,'2.1');assert.equal(got.gasUsedRaw,'21000');assert.equal(got.executable,false);
+assert.throws(()=>analyzeBasketSimulation(plan,[]),/count/);
+let bad:any=ok();bad[0].calls[1].status='0x0';assert.throws(()=>analyzeBasketSimulation(plan,bad),/failed/);
+bad=ok();bad[0].calls[2]=bal(2999999n);assert.throws(()=>analyzeBasketSimulation(plan,bad),/below/);
+bad=ok();bad[0].calls[2].returnData='0x1';assert.throws(()=>analyzeBasketSimulation(plan,bad),/Malformed/);
+assert.throws(()=>simulationRequest({...plan,expiresAt:'2000-01-01'}),/expired/);
+console.log('PASS sequence simulation: ordered probes, net output, gas exclusion, reverted/malformed/missing results, minimum and expiry.');

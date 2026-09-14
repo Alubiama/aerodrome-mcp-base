@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Aero — Wallet overview</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#report">Skip to report</a>
+    <main class="shell">
+      <header class="masthead">
+        <a class="brand" href="./" aria-label="Aero — home">AERO<span aria-hidden="true">/</span></a>
+        <p>Independent<br>community project</p>
+        <a href="/basket">Collect &amp; Consolidate ↗</a>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <div class="eyebrow"><span class="signal" aria-hidden="true"></span> Base · read only</div>
+        <h1 id="page-title">Wallet<br><em>overview</em></h1>
+        <p class="lede">Balances, veNFT locks, voting and claimable rewards in one bounded network snapshot.</p>
+        <form id="wallet-form" class="wallet-form" novalidate>
+          <label for="wallet">Wallet address</label>
+          <div class="input-row">
+            <input id="wallet" name="wallet" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="0x…" aria-describedby="form-help form-error" required>
+            <button type="submit">Check <span aria-hidden="true">↗</span></button>
+          </div>
+          <div class="form-meta">
+            <p id="form-help">We do not connect a wallet or request a signature. The RPC provider sees the address you query.</p>
+            <button id="demo-button" class="text-button" type="button">View demo</button>
+          </div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section id="report" class="report" aria-live="polite" aria-busy="false" tabindex="-1">
+        <div id="empty-state" class="empty-state">
+          <span class="empty-mark" aria-hidden="true">01</span>
+          <p>Enter a public address<br>or open the demo snapshot.</p>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><span>Read-only data</span><span>Aerodrome only; no airdrop is promised</span><span>Base · 8453</span></footer>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

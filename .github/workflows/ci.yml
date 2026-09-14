@@ -15,4 +15,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run demo
+      - run: npm run test:basket
+      - run: npm run test:wallet
+      - run: npm run test:web
+      - run: node --import tsx src/deployment-test.ts
       - run: npm run build
