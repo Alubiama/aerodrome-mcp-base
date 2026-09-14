@@ -1,3 +1,4 @@
+import { getWalletAccounting, accountingInputSchema, accountingSchema, type AccountingInput } from "./accounting.js";
 import { WalletRequiredError } from "../config.js";
 import { getRewardPlan, rewardPlanInputSchema, rewardPlanSchema } from "./reward-plan.js";
 import { getPoolDirectory, poolDirectoryInputSchema, poolDirectorySchema } from "./pools.js";
@@ -22,6 +23,7 @@ import { walletSnapshotSchema, poolComparisonSchema, poolComparisonInputSchema }
 import { getWalletChanges, getWalletReport, walletChangesSchema, walletChangesInputSchema, walletReportInputSchema, HistoryError, type WalletChangesInput, type WalletReportInput } from "./changes.js";
 
 export type AeroMcpServices = {
+  walletAccounting?: (input: AccountingInput, signal: AbortSignal) => Promise<Record<string, unknown>>;
   rewardPlan?: (input: z.infer<typeof rewardPlanInputSchema>, signal: AbortSignal) => Promise<Record<string, unknown>>;
   poolDirectory?: (input: z.infer<typeof poolDirectoryInputSchema>, signal: AbortSignal) => Promise<Record<string, unknown>>;
   votingIncentives?: (input: z.infer<typeof votingIncentivesInputSchema>, signal: AbortSignal) => Promise<Record<string, unknown>>;
@@ -61,7 +63,7 @@ function result(value: Record<string, unknown>) {
 
 function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HISTORY_BUSY" | "REPORT_NOT_FOUND" | "HISTORY_FULL" | "WALLET_REQUIRED") {
   const descriptions = {
-    WALLET_REQUIRED: "Supply wallet to aerodrome_wallet_overview, or set walletAddress in local configuration. Public protocol/pool reads do not require a wallet.",
+    WALLET_REQUIRED: "Supply wallet to aerodrome_wallet_overview or aerodrome_wallet_accounting, or set walletAddress in local configuration. Public protocol/pool reads do not require a wallet.",
     HISTORY_BUSY: "Another capture holds this scope lock. Retry with the SAME requestId after it finishes. After a crash, inspect the local lock before recovery.",
     REPORT_NOT_FOUND: "No committed report with this ID exists in the configured scope.",
     HISTORY_FULL: "History reached its retention limit. Export and archive it locally before starting a new history; existing reports remain readable.",
@@ -77,6 +79,7 @@ function failure(code: "READ_FAILED" | "BUSY" | "CANCELLED" | "DEADLINE" | "HIST
 }
 
 export function createAeroMcpServer(services: AeroMcpServices = {
+  walletAccounting: (input, signal) => getWalletAccounting(input, createDefaultRuntime(signal)),
   rewardPlan: (input, signal) => getRewardPlan(input, createDefaultRuntime(signal)),
   poolDirectory: (input, signal) => getPoolDirectory(input, createDefaultRuntime(signal)),
   votingIncentives: (input, signal) => getVotingIncentives(input, createDefaultRuntime(signal)),
@@ -115,7 +118,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.3.0" },
+    { name: "aerodrome-readonly", version: "0.4.0" },
     {
       instructions:
         "Use English for user-facing explanations. Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +
@@ -125,6 +128,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
         "Report the block interval, changed and unavailable sections, initialized balance/lock coverage, and epoch changes. First asset coverage is not a deposit. No signing, broadcasting or profitability proof. " +
         "Never generate a new requestId merely to reformat an answer or recover a lost response. " +
         "BASELINE_CREATED means there is no earlier comparison; zero changes only covers successfully compared fields. " +
+        "Use wallet_accounting for receipt-backed historical escrow flows and selected voting-pool rewards. Keep page sums, locked rebases and end-block holdings separate; never infer net profit. Retry PARTIAL pages before continuing; deduplicate by event ID and never sum holdings across pages. " +
         "Use protocol_status for protocol-only questions. Pool comparison is current-state only, not a history of arbitrary selected pools. " +
         "Use pool_directory for newest gauge registrations, not token listing dates. Use voting_incentives for deposited epoch bribes/fees and optional marginal or supplied-veNFT allocation scenarios. " +
         "Never present scenario estimates as claimable rewards, executable recommendations, USD rankings or APR. Preserve missing token metadata and scan limits. " +
@@ -223,6 +227,15 @@ export function createAeroMcpServer(services: AeroMcpServices = {
   }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
     if (!services.walletReport) throw new Error("Report service unavailable.");
     return walletChangesSchema.parse(await services.walletReport(input, signal));
+  }));
+
+  server.registerTool("aerodrome_wallet_accounting", {
+    title: "Historical Aerodrome cash flows and holdings",
+    description: "Read a bounded Base block page of wallet escrow deposits/withdrawals, selected veNFT rebases and explicit voting-pool reward receipts. Verify protocol logs against successful receipts and matching ERC-20 transfers. Return per-token page sums, event links, gaps and separate holdings at fixed toBlock. Not lifetime discovery, LP accounting, cost basis or net profit. On PARTIAL retry the same page; otherwise continue with nextFromBlock and unchanged scope/toBlock.",
+    inputSchema: accountingInputSchema, outputSchema: accountingSchema, annotations: readOnlyAnnotations
+  }, async (input, ctx) => execute(ctx.mcpReq.signal, async signal => {
+    if (!services.walletAccounting) throw new Error("Accounting service unavailable.");
+    return accountingSchema.parse(await services.walletAccounting(input, signal));
   }));
 
   server.registerTool("aerodrome_wallet_overview", {

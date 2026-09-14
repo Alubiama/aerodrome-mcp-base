@@ -64,7 +64,7 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 - “Show my current Aerodrome voting positions and bounded rewards.”
 - “Compare the voting weights and gauge status of these pool addresses: …”
 
-Version 0.3.0 exposes 11 tools:
+Version 0.4.0 exposes 12 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -73,6 +73,7 @@ Version 0.3.0 exposes 11 tools:
 | `aerodrome_protocol_status` | Official contract identity, block, epoch and protocol weights |
 | `aerodrome_voting_position` | Configured or supplied veNFT voting positions |
 | `aerodrome_wallet_rewards` | Current-vote reward scope and explicitly configured LP gauges |
+| `aerodrome_wallet_accounting` | Receipt-backed escrow cash flows, selected voting-pool rewards and rebases, with independent end-block holdings |
 | `aerodrome_wallet_overview` | Address-first balances, automatic veNFT discovery, locks, voting, rewards and an English brief |
 | `aerodrome_wallet_snapshot` | All wallet sections at one block with a final block-hash recheck |
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
@@ -229,3 +230,29 @@ For a small private pilot, an SSH command can carry the existing stdio protocol 
 - `AERODROME_HISTORY_DIR`: absolute path to that account's private report directory. Existing local defaults remain unchanged when these variables are absent.
 
 Keep code/runtime immutable to the service account, history private, and credentials outside the repository. A private pilot can restrict one active SSH session per account and cap the Node heap; these are not proof of capacity for public multi-user hosting. Stdio processes start when a client connects and stop when it disconnects. For Codex's command/args setup, see [OpenAI's MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+
+### Historical cash-flow accounting
+
+`aerodrome_wallet_accounting` answers what was paid into escrow, withdrawn, received as voting rewards, or credited as a rebase **within an explicit block window and contract scope**. Each accepted event has a transaction hash, block hash, protocol log index and matching ERC-20 transfer log index. Raw amounts are grouped by category and token with the contributing event IDs. Unknown decimals remain raw units.
+
+```json
+{"name":"aerodrome_wallet_accounting","arguments":{"wallet":"0x0000000000000000000000000000000000000002","fromBlock":"40000000","toBlock":"40001999","blockSpan":2000,"tokenIds":["1"],"pools":[]}}
+```
+
+The address and ID above are synthetic; supply the public wallet, veNFT IDs and historical voting-pool addresses you actually want to inspect. With no explicit wallet, local wallet configuration is used. Configured IDs are inherited only for that same wallet; an explicit different wallet never inherits them. No automatic historical pool/veNFT discovery is performed. Empty `pools` means voting reward contracts were **not scanned**, not that no rewards were earned. At most eight pools and sixteen IDs are accepted. The selected pools' fee/bribe sources are verified through official Voter mappings at `toBlock`.
+
+Pagination is deterministic and inclusive: use returned `nextFromBlock` with the same wallet, IDs, pools and fixed `toBlock`. The default page is 2,000 blocks, configurable from 1 to 10,000. A partial page returns `retryFromBlock` and no continuation; retry that page with a smaller span or after RPC recovery. Deduplicate events by `id` when combining retries. Limits are 500 protocol events and 32 receipt attempts per call. All totals are **page sums**, not lifetime totals. A successful empty scan covers only the reported sources and block window. RPC providers may impose smaller log limits.
+
+Categories:
+
+- `WALLET_DEPOSIT`: a wallet-funded escrow deposit, which may fund someone else's veNFT. It is not the purchase cost of AERO.
+- `WALLET_WITHDRAWAL`: escrow principal paid to the wallet.
+- `VOTING_REWARD_RECEIVED`: matching gross transfer from a verified selected pool's voting reward contract.
+- `REBASE_RECEIVED`: a selected veNFT's rebase paid directly to this wallet, e.g. after lock expiry.
+- `SELECTED_POSITION_REBASE_LOCKED`: a rebase credited to the selected veNFT's locked principal. Ownership must match the wallet both before and after the event block, with no NFT transfers anywhere in that block. Otherwise the event is excluded. This is not liquid wallet income.
+- `UNVERIFIED_EVENT`: receipt, provenance or transfer matching did not verify; excluded from sums. Zero-value verified protocol events require no transfer and represent no cash movement.
+
+`currentHoldings` independently reads ETH/AERO/USDC and selected normal locks at `toBlock`; it is **not** a calculated remainder from the reported flows, and it is not a balance of every reward token. Never sum the repeated holdings across pages. Historical ownership reads and a no-transfer check gate rebase totals; same-block mint/transfer cases are conservatively excluded. NFT ownership transfers, split/merge/managed positions, LP principal, external vaults, swaps, opening balances, gas, cost basis and USD valuation are not reconciled. `netProfitUsd` stays null. Contract mappings are resolved at the end block, so replaced historical reward sources remain outside scope. RPC log completeness is trusted; accepted events are checked against successful receipts and canonical block responses, not cryptographic inclusion proofs. Non-standard tokens may report transfers that do not equal net wallet balance changes.
+
+The event layouts and classification are based on the official [VotingEscrow interface](https://github.com/aerodrome-finance/contracts/blob/main/contracts/interfaces/IVotingEscrow.sol), [Reward implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/rewards/Reward.sol) and [RewardsDistributor implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/RewardsDistributor.sol). No wallet signing, paid scanner, external model or local history write is used by this tool.

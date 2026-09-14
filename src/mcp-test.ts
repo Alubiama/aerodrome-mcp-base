@@ -1,3 +1,4 @@
+import { testWalletAccounting } from "./accounting-test.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -554,6 +555,7 @@ async function testPoolComparison() {
 }
 
 async function main() {
+  await testWalletAccounting();
   await testWalletOverview();
   await testRequestControls();
   await testRpcCancellationIsolation();
@@ -600,6 +602,7 @@ async function main() {
     "aerodrome_reward_plan",
     "aerodrome_voting_incentives",
     "aerodrome_voting_position",
+    "aerodrome_wallet_accounting",
     "aerodrome_wallet_changes",
     "aerodrome_wallet_overview",
     "aerodrome_wallet_report",
@@ -683,7 +686,7 @@ async function main() {
   assert.deepEqual(stdioTools.tools.map((tool) => tool.name).sort(), listed.tools.map((tool) => tool.name).sort());
   await stdioClient.close();
   assert.match(childStderr, /Aerodrome read-only MCP running on stdio/);
-  console.log("MCP tests passed: data safety, Base chain checks, 11 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
+  console.log("MCP tests passed: data safety, Base chain checks, 12 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
 }
 
 main().catch((error) => {

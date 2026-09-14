@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 — 2026-09-14
+
+- Added `aerodrome_wallet_accounting`: bounded block pagination, receipt/transfer-verified escrow deposits and withdrawals, explicit voting-pool rewards and selected veNFT rebases. Per-token page sums link to contributing events; end-block holdings remain independent. Failed pages require retry; missing scope is not zero. Rebase totals require matching historical wallet ownership before/after the event block and no intra-block NFT transfers; foreign or ambiguous ownership is excluded. No lifetime discovery, LP P&L, automatic trades, or invented USD profit.
+
 ## 0.3.0 — 2026-09-14
 
 - Added absolute configuration/history path overrides for isolated SSH-hosted accounts and a compiled build command. The local stdio defaults are preserved.
