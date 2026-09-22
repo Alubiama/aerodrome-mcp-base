@@ -1,3 +1,5 @@
+![Aerodrome MCP for Base — independent read-only tools](docs/assets/banner.svg)
+
 # Aerodrome MCP for Base
 
 **Compare voting allocations, inspect rewards, and keep a private decision record.**
@@ -6,7 +8,9 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.5.1**. License: MIT.
+Version: **0.5.2**. License: MIT.
+
+[Integration guide](INTEGRATION.md) · [Interactive demo](integration-demo/) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
 
 ## Quick start
 

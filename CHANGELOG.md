@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- Unified the integration demo and README with an Aerodrome-inspired visual identity.
+- Added original banner/icon artwork, branding provenance and independent-project labeling.
+- Added MCP display title, description, project URL and embedded icon; tool names and read-only behavior are unchanged.
+
+
 ## 0.5.1 — 2026-09-22
 
 - Add an actual stdio client example, an interactive synthetic inspection panel and generated tool schema snapshots.

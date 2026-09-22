@@ -124,7 +124,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.5.1" },
+    { name: "aerodrome-readonly", title: "Aerodrome MCP for Base", version: "0.5.2", description: "Independent, read-only Aerodrome tools on Base. Compare voting allocations, inspect rewards, and keep private decision records.", websiteUrl: "https://github.com/Alubiama/aerodrome-mcp-base", icons: [{ src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjgiIGhlaWdodD0iMTI4IiB2aWV3Qm94PSIwIDAgMTI4IDEyOCI+PHJlY3Qgd2lkdGg9IjEyOCIgaGVpZ2h0PSIxMjgiIHJ4PSIyNiIgZmlsbD0iIzA5MGUxZiIvPjxwYXRoIGQ9Ik0yOCA4OUw1NSAzNUg3MEw5OCA4OUg4MUw3NCA3NEg1MEw0MyA4OVpNNTYgNjBINjhMNjIgNDZaIiBmaWxsPSIjNzI5ZGZmIi8+PHBhdGggZD0iTTMwIDEwMEg5OCIgc3Ryb2tlPSIjZWY2NzVkIiBzdHJva2Utd2lkdGg9IjQiLz48L3N2Zz4=", mimeType: "image/svg+xml", sizes: ["128x128"] }] },
     {
       instructions:
         "Use English for user-facing explanations. Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +

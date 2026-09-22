@@ -1,8 +1,8 @@
 {
   "name": "aerodrome-mcp-base",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
-  "description": "Read-only Aerodrome evidence and local wallet change tracking on Base.",
+  "description": "Independent read-only Aerodrome MCP for Base: voting allocations, rewards and private decision records.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -41,6 +41,8 @@
     "examples/",
     "integration-demo/",
     "INTEGRATION.md",
-    "PILOT.md"
+    "PILOT.md",
+    "docs/assets/",
+    "BRAND.md"
   ]
 }
