@@ -1,12 +1,12 @@
 # Aerodrome MCP for Base
 
-**What changed in my Aerodrome positions and rewards?**
+**Compare voting allocations, inspect rewards, and keep a private decision record.**
 
 A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your current veNFT voting positions and bounded claimable rewards against a saved snapshot, or compare selected pools' voting evidence.
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.3.0**. License: MIT.
+Version: **0.5.0**. License: MIT.
 
 ## Quick start
 
@@ -79,6 +79,8 @@ Version 0.4.0 exposes 12 tools:
 | `aerodrome_compare_pools` | 2–16 distinct pool addresses; voting evidence, not investment ranking |
 | `aerodrome_wallet_changes` | Capture with a UUID `requestId`; retry the same ID to recover the same report |
 | `aerodrome_wallet_report` | Retrieve a saved report by `reportId`, without RPC or baseline changes |
+| `aerodrome_compare_allocations` | Compare simultaneous splits and competing-vote sensitivity on one pinned block |
+| `aerodrome_decision_card` | Export a private draft or explicitly selected allocation card |
 | `aerodrome_reward_plan` | Bounded retention and direct-USDC quote scenarios for explicit veNFT selections; never executes a trade |
 
 ## Discover pools and inspect voting incentives (0.3)
@@ -256,3 +258,46 @@ Categories:
 `currentHoldings` independently reads ETH/AERO/USDC and selected normal locks at `toBlock`; it is **not** a calculated remainder from the reported flows, and it is not a balance of every reward token. Never sum the repeated holdings across pages. Historical ownership reads and a no-transfer check gate rebase totals; same-block mint/transfer cases are conservatively excluded. NFT ownership transfers, split/merge/managed positions, LP principal, external vaults, swaps, opening balances, gas, cost basis and USD valuation are not reconciled. `netProfitUsd` stays null. Contract mappings are resolved at the end block, so replaced historical reward sources remain outside scope. RPC log completeness is trusted; accepted events are checked against successful receipts and canonical block responses, not cryptographic inclusion proofs. Non-standard tokens may report transfers that do not equal net wallet balance changes.
 
 The event layouts and classification are based on the official [VotingEscrow interface](https://github.com/aerodrome-finance/contracts/blob/main/contracts/interfaces/IVotingEscrow.sol), [Reward implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/rewards/Reward.sol) and [RewardsDistributor implementation](https://github.com/aerodrome-finance/contracts/blob/main/contracts/RewardsDistributor.sol). No wallet signing, paid scanner, external model or local history write is used by this tool.
+
+### Compare simultaneous voting allocations
+
+`aerodrome_compare_allocations` compares 1–4 explicit scenarios across 1–5 distinct pools for 1–4 normal veNFTs. Each `weightsBps` array follows the input pool order and must sum to 10000 (100%). The same split applies to each supplied veNFT. This is a comparison, not an optimizer or a voting transaction.
+
+```json
+{
+  "pools": ["0x0000000000000000000000000000000000000010", "0x0000000000000000000000000000000000000011"],
+  "tokenIds": ["1"],
+  "scenarios": [
+    {"name": "Equal split", "weightsBps": [5000, 5000]},
+    {"name": "First pool only", "weightsBps": [10000, 0]}
+  ]
+}
+```
+
+Addresses and ID above are synthetic. Replace them with selected public pool addresses and veNFT IDs. All scenarios reuse one block-pinned evidence read. Each pool's denominator subtracts the supplied veNFTs' existing reward-contract balances and adds their proposed allocated votes. Vote and reward rounding are per veNFT; vote dust is exposed as `unallocatedRoundingRaw`. Per-token raw subtotals group only identical token addresses and carry a completeness flag. Failed or truncated reads are not zero rewards; missing decimals suppress formatted values. The nested `evidence` contains the original independent full-allocation estimates; use `scenarios` for simultaneous split results.
+
+No token-value ranking, USD total, fee forecast, ownership/eligibility check, transaction simulation, or execution is provided. Current deposits and votes can change; these scenarios are not claimable amounts or guaranteed epoch-end payouts.
+
+Every allocation scenario now includes `sensitivity` for +20%, +50% and +100% competing votes. For each reward contract, competing weight is `totalSupplyRaw - removedExistingVoteRaw`; added competing weight is floored in raw units. Deposits and proposed own votes stay fixed. All supplied veNFTs share the same denominator, while their reward amounts are floored individually. No additional RPC reads are needed.
+
+Each stress result preserves per-token subtotals and completeness. `tokenChanges` exposes the decrease in raw units and basis points; percentage decrease is null when the baseline is zero. Partial-subtotal changes are not complete portfolio changes. Zero observed competing votes remain zero under proportional stress, which does not exclude new voters. These are uniform hypothetical stresses, not forecasts, guaranteed bounds, or a model of where new votes will actually go.
+
+### Private decision cards
+
+`aerodrome_decision_card` accepts `{ "allocation": <compare_allocations input>, "selectedScenario": "optional exact scenario name", "reason": "your reason" }`. Omit `selectedScenario` for a DRAFT. Only supply it after the user explicitly chooses; selection also requires a nonempty reason. USER_SELECTED records the caller's assertion, not verified human approval or an executed vote. The tool fetches one pinned evidence set and returns the card without writing files.
+
+The card keeps input, comparison, sensitivity, block provenance and a SHA-256 content checksum. The checksum detects accidental changes; it is not a signature or independent authenticity check. To save a card response locally, export only its structuredContent as JSON, then run:
+
+```sh
+npm run --silent save-card < /path/to/private-card.json
+```
+
+This writes an exclusive, non-overwriting `.decision-cards/<checksum>.json` file with owner-only permissions. Cards contain position identifiers and your reasoning: keep them private. They are excluded from Git and the package. A saved card does not establish future payouts or profit. After an epoch, accounting receipts must be checked separately; automatic outcome attribution is not part of this release.
+
+Try the entire generation/save flow offline with synthetic data:
+
+```sh
+npm run --silent demo:allocations | npm run --silent save-card
+```
+
+This demonstrates DRAFT cards, two simultaneous splits, three competing-vote stress levels and private saving. It uses an in-memory MCP connection, no network or real wallet. Repeating the exact same demo refuses to overwrite the identical card.

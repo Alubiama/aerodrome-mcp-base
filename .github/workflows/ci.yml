@@ -16,3 +16,4 @@ jobs:
       - run: npm test
       - run: npm run demo
       - run: npm run build
+      - run: npm run --silent demo:allocations | npm run --silent save-card

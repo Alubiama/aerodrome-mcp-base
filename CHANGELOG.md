@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-09-22
+
+- Compare up to four user-specified allocations across five pools with per-veNFT rounding and existing-vote removal.
+- Stress competing votes by +20%, +50%, +100%, preserving per-token partial evidence and fixed deposits.
+- Export private DRAFT or explicitly USER_SELECTED decision cards with content checksums; save locally without overwriting.
+- Add offline allocation/card demo, arithmetic and partial-evidence tests, MCP invocation and private-save checks.
+- No forecast, optimizer, trade execution, audit claim, or automatic outcome attribution.
+
+
 ## 0.4.0 — 2026-09-14
 
 - Added `aerodrome_wallet_accounting`: bounded block pagination, receipt/transfer-verified escrow deposits and withdrawals, explicit voting-pool rewards and selected veNFT rebases. Per-token page sums link to contributing events; end-block holdings remain independent. Failed pages require retry; missing scope is not zero. Rebase totals require matching historical wallet ownership before/after the event block and no intra-block NFT transfers; foreign or ambiguous ownership is excluded. No lifetime discovery, LP P&L, automatic trades, or invented USD profit.

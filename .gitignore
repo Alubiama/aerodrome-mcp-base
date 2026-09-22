@@ -6,3 +6,7 @@ config.json
 .env.*
 *.log
 .DS_Store
+
+# Private local analysis and decision records
+.decision-cards/
+reviews/

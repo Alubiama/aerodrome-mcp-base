@@ -1,0 +1,7 @@
+config.json
+.env*
+.snapshot-history/
+.decision-cards/
+reviews/
+**/live-*
+**/*private*

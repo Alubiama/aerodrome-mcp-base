@@ -596,7 +596,9 @@ async function main() {
 
   const listed = await client.listTools();
   assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
+    "aerodrome_compare_allocations",
     "aerodrome_compare_pools",
+    "aerodrome_decision_card",
     "aerodrome_pool_directory",
     "aerodrome_protocol_status",
     "aerodrome_reward_plan",
@@ -686,7 +688,7 @@ async function main() {
   assert.deepEqual(stdioTools.tools.map((tool) => tool.name).sort(), listed.tools.map((tool) => tool.name).sort());
   await stdioClient.close();
   assert.match(childStderr, /Aerodrome read-only MCP running on stdio/);
-  console.log("MCP tests passed: data safety, Base chain checks, 12 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
+  console.log("MCP tests passed: data safety, Base chain checks, 14 tools, strict snapshot/comparison schemas, read-only annotations, bounded errors, and cross-cwd stdio lifecycle.");
 }
 
 main().catch((error) => {
