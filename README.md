@@ -10,7 +10,7 @@ Independent community project. Not affiliated with Aerodrome or Base. This relea
 
 Version: **0.5.2**. License: MIT.
 
-[Integration guide](INTEGRATION.md) · [Interactive demo](integration-demo/) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
+[Integration guide](INTEGRATION.md) · [Demo source and setup](INTEGRATION.md) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
 
 ## Quick start
 
@@ -68,7 +68,7 @@ For Codex, add the equivalent `[mcp_servers.aerodrome]` table to project `.codex
 - “Show my current Aerodrome voting positions and bounded rewards.”
 - “Compare the voting weights and gauge status of these pool addresses: …”
 
-Version 0.4.0 exposes 12 tools:
+The server exposes 14 tools:
 
 | Tool | Purpose |
 | --- | --- |
