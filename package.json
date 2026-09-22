@@ -1,6 +1,6 @@
 {
   "name": "aerodrome-mcp-base",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Read-only Aerodrome evidence and local wallet change tracking on Base.",
   "license": "MIT",
@@ -15,7 +15,9 @@
     "demo": "node --import tsx src/demo.ts",
     "build": "tsc",
     "save-card": "node --import tsx src/save-decision-card.ts",
-    "demo:allocations": "node --import tsx src/allocation-demo.ts"
+    "demo:allocations": "node --import tsx src/allocation-demo.ts",
+    "example:stdio": "node --import tsx examples/stdio-client.ts",
+    "demo:integration:build": "node --import tsx examples/build-demo.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
@@ -35,6 +37,10 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "examples/",
+    "integration-demo/",
+    "INTEGRATION.md",
+    "PILOT.md"
   ]
 }

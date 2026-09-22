@@ -124,7 +124,7 @@ export function createAeroMcpServer(services: AeroMcpServices = {
     }
   }
   const server = new McpServer(
-    { name: "aerodrome-readonly", version: "0.5.0" },
+    { name: "aerodrome-readonly", version: "0.5.1" },
     {
       instructions:
         "Use English for user-facing explanations. Base evidence. For changes, generate a UUID requestId before aerodrome_wallet_changes. Reuse that ID for retries; the saved report is immutable. " +

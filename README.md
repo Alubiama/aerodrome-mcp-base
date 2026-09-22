@@ -6,7 +6,7 @@ A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your c
 
 Independent community project. Not affiliated with Aerodrome or Base. This release supports **Aerodrome only**, not every protocol on Base.
 
-Version: **0.5.0**. License: MIT.
+Version: **0.5.1**. License: MIT.
 
 ## Quick start
 
@@ -301,3 +301,7 @@ npm run --silent demo:allocations | npm run --silent save-card
 ```
 
 This demonstrates DRAFT cards, two simultaneous splits, three competing-vote stress levels and private saving. It uses an in-memory MCP connection, no network or real wallet. Repeating the exact same demo refuses to overwrite the identical card.
+
+## For integrators
+
+Start with [the stdio example and integration guide](INTEGRATION.md), the interactive synthetic panel in `integration-demo/`, and the [proposed external pilot](PILOT.md). Run `npm run demo:integration:build` to regenerate the panel data through MCP and verify its arithmetic. This is an offline integration example, not a live dashboard or hosted API.

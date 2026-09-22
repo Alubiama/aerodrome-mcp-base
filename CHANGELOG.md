@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-09-22
+
+- Add an actual stdio client example, an interactive synthetic inspection panel and generated tool schema snapshots.
+- Verify 22 fixture inputs across 176 pool/stress cases; document partial rendering, errors, privacy and measurement limits.
+- Include an external pilot protocol and unsent invitation; no external adoption is claimed.
+
+
 ## 0.5.0 — 2026-09-22
 
 - Compare up to four user-specified allocations across five pools with per-veNFT rounding and existing-vote removal.

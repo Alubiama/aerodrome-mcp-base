@@ -1,0 +1,10 @@
+{
+  "mode": "SYNTHETIC_STDIO",
+  "samples": 22,
+  "node": "v26.9.0",
+  "platform": "darwin",
+  "medianMs": 1,
+  "maxMs": 163,
+  "scope": "Tool latency after connection; includes validation and serialization. No RPC. Not a production SLA.",
+  "arithmeticOracle": "22 inputs x 4 stress states x 2 pools = 176 checks of denominators and rewards passed"
+}

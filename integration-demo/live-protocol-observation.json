@@ -1,0 +1,13 @@
+{
+  "mode": "LIVE_PUBLIC_PROTOCOL_ONLY",
+  "startupMs": 502,
+  "toolMs": 3157,
+  "observation": {
+    "observedAt": "2026-09-22T16:43:23.053Z",
+    "blockNumber": "51653027",
+    "blockHash": "0xc0fc953f652093293245c6edc987ba90c7ea8a93dbbf7057c16a3e425f5516d1",
+    "blockTimestamp": "2026-09-22T16:43:21.000Z"
+  },
+  "samples": 1,
+  "scope": "Single public protocol-status call. No wallet. Not allocation latency, SLA, or contract-equivalence proof."
+}
