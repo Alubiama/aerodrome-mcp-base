@@ -4,12 +4,15 @@ const v=calculateBasketValue(3_000_000n,2_000_000_000n,[100_000n,200_000n],[10_0
 assert.equal(v.feeWei,632_000_000_000_000n);assert.equal(v.feeUsdcRaw,1_264_000n);assert.equal(v.netUsdcRaw,1_736_000n);
 assert.equal(calculateBasketValue(100n,2_000_000_000n,[100_000n],[0n],[0n],2_000_000_000n).netUsdcRaw<0n,true);
 for(const bad of [[1n,1n,[1n],[],[0n],2n],[1n,0n,[1n],[0n],[0n],2n],[1n,1n,[1n],[-1n],[0n],2n]] as any[])assert.throws(()=>(calculateBasketValue as any)(...bad));
-const plan:any={wallet:'0x0000000000000000000000000000000000000001',blockNumber:'10',expiresAt:new Date(Date.now()+60000).toISOString(),calls:[{to:'0x0000000000000000000000000000000000000002',data:'0x1234',value:'0x0'}]};
+const blockHash='0x'+'ab'.repeat(32);
+const plan:any={wallet:'0x0000000000000000000000000000000000000001',blockNumber:'10',blockHash,expiresAt:new Date(Date.now()+60000).toISOString(),calls:[{to:'0x0000000000000000000000000000000000000002',data:'0x1234',value:'0x0'}]};
 const simulation:any={status:'SEQUENCE_SIMULATED',receivedUsdc:'3',gasUsedRaw:'100',callGasUsedRaw:['100']};
-const client:any={getBlock:async()=>({number:10n}),getGasPrice:async()=>2_000_000_000n,readContract:async({functionName,args}:any)=>functionName==='getAmountsOut'?[args[0],2_000_000_000n]:undefined,estimateL1Fee:async()=>10_000_000_000_000n,estimateOperatorFee:async()=>1_000_000_000_000n};
+const client:any={getBlock:async()=>({number:10n,hash:blockHash}),getGasPrice:async()=>2_000_000_000n,readContract:async({functionName,args}:any)=>functionName==='getAmountsOut'?[args[0],2_000_000_000n]:undefined,estimateL1Fee:async()=>10_000_000_000_000n,estimateOperatorFee:async()=>1_000_000_000_000n};
 const signal=new AbortController().signal;
 let result=await estimateBasketValue(plan,simulation,signal,client);assert.equal(result.status,'ESTIMATED');assert.equal(result.estimatedNetUsdc,'2.9776');assert.equal(result.worthCollecting,true);
 result=await estimateBasketValue(plan,{...simulation,callGasUsedRaw:[]},signal,client);assert.equal(result.status,'UNKNOWN');
 result=await estimateBasketValue(plan,simulation,signal,{...client,estimateL1Fee:async()=>{throw Error('unavailable')}});assert.equal(result.status,'UNKNOWN');
+result=await estimateBasketValue(plan,simulation,signal,{...client,getBlock:async()=>({number:10n,hash:'0x'+'cd'.repeat(32)})});assert.equal(result.status,'UNKNOWN');assert.equal(result.reason,'Quote block changed.');
+result=await estimateBasketValue({...plan,blockHash:''},simulation,signal,client);assert.equal(result.status,'UNKNOWN');
 result=await estimateBasketValue({...plan,expiresAt:'2000-01-01'},simulation,signal,client);assert.equal(result.status,'UNKNOWN');
-console.log('PASS basket value: whole-basket arithmetic, separate fee components, negative net, missing fee and expiry UNKNOWN. No live transaction.');
+console.log('PASS basket value: whole-basket arithmetic, separate fee components, negative net, block mismatch, missing fee and expiry UNKNOWN. No live transaction.');

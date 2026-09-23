@@ -6,7 +6,7 @@ import {publicConfig} from './config.js';
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address;
 const WEI=10n**18n,USDC_UNIT=10n**6n;
 type Call={to:string;data:string;value:string};
-type BasketValueInput={wallet:string;blockNumber:string;expiresAt:string;calls:Call[]};
+type BasketValueInput={wallet:string;blockNumber:string;blockHash:string;expiresAt:string;calls:Call[]};
 type SimulatedValue={receivedUsdc:string;gasUsedRaw:string;callGasUsedRaw?:string[];status:string};
 export type ValueDecision={status:'ESTIMATED'|'UNKNOWN';reason:string|null;grossUsdc:string;estimatedNetworkFeeUsdc:string|null;estimatedNetUsdc:string|null;worthCollecting:boolean|null;feeEth:string|null;gasPriceWei:string|null;priceUsdcPerEth:string|null;asOf:string;limitations:string[]};
 export function calculateBasketValue(grossRaw:bigint,gasPriceWei:bigint,gasUnits:bigint[],l1Fees:bigint[],operatorFees:bigint[],priceUsdcPerEthRaw:bigint):{feeWei:bigint;feeUsdcRaw:bigint;netUsdcRaw:bigint}{
@@ -20,6 +20,7 @@ export async function estimateBasketValue(plan:BasketValueInput,simulation:Simul
  const base={grossUsdc:formatUnits(grossRaw,6),asOf,limitations:['Estimate for the selected basket only. Network fees and pool prices can change.','Approvals are separate transactions. A failed swap can still spend gas.','Simulation uses validation=false; nonce, gas affordability, wallet prompts, and transaction inclusion are unverified.']};
  const unknown=(reason:string):ValueDecision=>({status:'UNKNOWN',reason,...base,estimatedNetworkFeeUsdc:null,estimatedNetUsdc:null,worthCollecting:null,feeEth:null,gasPriceWei:null,priceUsdcPerEth:null});
  if(simulation.status!=='SEQUENCE_SIMULATED'||Date.parse(plan.expiresAt)<=Date.now()||plan.calls.length<1||plan.calls.length>11)return unknown('Simulation missing or plan expired.');
+ if(!/^0x[0-9a-fA-F]{64}$/.test(plan.blockHash))return unknown('Quote block hash unavailable.');
  if(!Array.isArray(simulation.callGasUsedRaw)||simulation.callGasUsedRaw.length!==plan.calls.length)return unknown('Per-transaction gas evidence unavailable.');
  try{
   signal.throwIfAborted();
@@ -28,7 +29,7 @@ export async function estimateBasketValue(plan:BasketValueInput,simulation:Simul
   const gasUnits=simulation.callGasUsedRaw.map(x=>{if(!/^\d{1,20}$/.test(x))throw Error('Malformed gas');return BigInt(x)});
   if(gasUnits.reduce((s,x)=>s+x,0n)!==BigInt(simulation.gasUsedRaw))return unknown('Gas totals disagree.');
   const block=await client.getBlock({blockNumber:BigInt(plan.blockNumber)});
-  if(block.number!==BigInt(plan.blockNumber))return unknown('Quote block unavailable.');
+  if(block.number!==BigInt(plan.blockNumber)||!block.hash||block.hash.toLowerCase()!==plan.blockHash.toLowerCase())return unknown('Quote block changed.');
   const requests=plan.calls.map(c=>({account:plan.wallet as Address,to:c.to as Address,data:c.data as Hex,value:BigInt(c.value)}));
   const [gasPrice,quote,...feeParts]=await Promise.all([client.getGasPrice(),classicQuote(client,QUOTE_WETH,USDC,WEI,block.number,feeSignal),...requests.flatMap(req=>[client.estimateL1Fee(req),client.estimateOperatorFee(req)])]);
   signal.throwIfAborted();
