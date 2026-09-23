@@ -21,3 +21,12 @@ console.log('PASS wallet: Base identity, capability parsing, account/network inv
 accounts=[account];capability='supported';
 await session.connect({...provider,request:async(a:any)=>{if(a.method==='eth_requestAccounts')listeners.get('accountsChanged')?.();return provider.request(a)}});assert.equal(session.state.status,'connected');session.detach();
 console.log('PASS initial wallet accountsChanged event is accepted only after final identity recheck.');
+
+// A switch during the final identity read cannot restore a valid session.
+accounts=[account];network='0x2105';
+await session.connect({...provider,request:async(a:any)=>{if(a.method==='eth_accounts')listeners.get('chainChanged')?.();return provider.request(a)}});
+assert.equal(session.state.status,'changed');session.detach();
+await session.connect(provider);listeners.get('disconnect')!();assert.equal(session.state.status,'changed');session.detach();
+await session.connect({...provider,request:async()=>{throw Object.assign(Error('denied'),{code:4001})}});
+assert.equal(session.state.status,'error');assert.equal(session.state.message,'Connection declined.');session.detach();
+console.log('PASS wallet adversarial checks: final-read network race, disconnect invalidation and user refusal.');

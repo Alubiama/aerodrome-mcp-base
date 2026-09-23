@@ -1,6 +1,6 @@
 {
   "name": "aerodrome-mcp-base",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Read-only Aerodrome evidence and local wallet change tracking on Base.",
   "license": "MIT",
@@ -17,10 +17,10 @@
     "typecheck": "tsc --noEmit",
     "demo": "node --import tsx src/demo.ts",
     "build": "tsc",
-    "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts"
+    "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts && node --import tsx src/basket-value-test.ts",
+    "test:security": "node --import tsx src/request-admission-test.ts && node --import tsx src/plan-guard-test.ts && node --import tsx src/universal-plan-test.ts"
   },
   "dependencies": {
-    "@base-org/account": "2.5.10",
     "@modelcontextprotocol/server": "^2.0.0",
     "viem": "^2.37.0",
     "zod": "^4.6.1"

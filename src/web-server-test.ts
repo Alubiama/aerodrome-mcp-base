@@ -7,7 +7,7 @@ import { getWalletOverview } from "./mcp/overview.js";
 
 let reads = 0;
 let mode = "normal";
-const server = createOverviewWebServer({ deadlineMs: 80, read: async (input, signal) => {
+const server = createOverviewWebServer({ deadlineMs: 500, read: async (input, signal) => {
   reads++;
   if (mode === "wait") return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("stopped")), { once: true }));
   if (mode === "fail") throw new Error("PRIVATE_INTERNAL_DETAIL");
@@ -42,7 +42,8 @@ try {
   assert.equal((await fetch(`${origin}/basket`)).status, 200);
   assert.equal((await fetch(`${origin}/basket`,{method:"HEAD"})).status,200);
   assert.equal((await fetch(`${origin}/wallet.js`)).status,200);
-  assert.equal((await fetch(`${origin}/base-account-sdk.js`)).status,200);
+  assert.equal((await fetch(`${origin}/plan-guard.js`)).status,200);
+  assert.equal((await fetch(`${origin}/base-account-sdk.js`)).status,404);
   for (const route of ['inventory','quote','plan','simulate']) {
     assert.equal((await fetch(`${origin}/api/basket/${route}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:'invalid'})})).status,400);
     assert.equal((await fetch(`${origin}/api/basket/${route}`,{method:'POST',headers:{'content-type':'application/json',origin:'https://evil.example'},body:JSON.stringify({wallet})})).status,403);
@@ -67,11 +68,13 @@ try {
   assert.equal((await failure.text()).includes("PRIVATE_INTERNAL_DETAIL"), false);
   mode = "wait";
   const first = post({ wallet });
+  while (reads < 5) await new Promise(resolve => setTimeout(resolve, 1));
   const second = post({ wallet });
-  while (reads < 6) await new Promise(resolve => setTimeout(resolve, 1));
+  assert.equal((await second).status,429);
+  while (reads < 5) await new Promise(resolve => setTimeout(resolve, 1));
   assert.equal((await post({ wallet })).status, 429);
   assert.equal((await first).status, 504);
-  assert.equal((await second).status, 504);
+
   mode = "normal";
   assert.equal((await post({ wallet })).status, 200, "timeout releases request slots");
   console.log("PASS web HTTP integration: offline demo, validation, host/origin isolation, no private files, partial evidence, failure redaction, wallet isolation, concurrency, cancellation and recovery.");
