@@ -4,7 +4,7 @@ import {basketQuoteInput,quoteBasket,type BasketRuntime} from './basket.js';
 import {makeClient} from './client.js';
 import {publicConfig} from './config.js';
 import {CLASSIC_ROUTER} from './aerodrome-quote.js';
-export const planInput=basketQuoteInput.omit({provider:true,destination:true}).refine(x=>x.tokens.length>=2&&x.tokens.length<=5,{message:'Select 2–5 input tokens.'}).refine(x=>!x.tokens.some(t=>t.toLowerCase()==='0x4200000000000000000000000000000000000006')||!!x.amounts?.['0x4200000000000000000000000000000000000006'],{message:'WETH requires an explicit amount.'});
+export const planInput=basketQuoteInput.omit({provider:true,destination:true}).refine(x=>x.tokens.length>=1&&x.tokens.length<=5,{message:'Select 1–5 input tokens.'}).refine(x=>!x.tokens.some(t=>t.toLowerCase()==='0x4200000000000000000000000000000000000006')||!!x.amounts?.['0x4200000000000000000000000000000000000006'],{message:'WETH requires an explicit amount.'});
 const approvalAbi=parseAbi(['function allowance(address owner,address spender) view returns (uint256)','function approve(address spender,uint256 amount) returns (bool)']);
 const swapAbi=parseAbi(['function swapExactTokensForTokens(uint256 amountIn,uint256 amountOutMin,(address from,address to,bool stable,address factory)[] routes,address to,uint256 deadline) returns (uint256[] amounts)']);
 export async function prepareBasketPlan(raw:unknown,signal:AbortSignal,rt?:BasketRuntime){

@@ -8,7 +8,7 @@ type Plan=Awaited<ReturnType<typeof prepareBasketPlan>>;
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const abi=parseAbi(['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)']);
 function probes(plan:Plan){
- if(!Array.isArray(plan.tokens)||plan.tokens.length<2||plan.tokens.length>5||new Set(plan.tokens.map(t=>t.token.toLowerCase())).size!==plan.tokens.length||plan.tokens.some(t=>t.token.toLowerCase()===USDC.toLowerCase()))throw Error('Invalid input tokens');
+ if(!Array.isArray(plan.tokens)||plan.tokens.length<1||plan.tokens.length>5||new Set(plan.tokens.map(t=>t.token.toLowerCase())).size!==plan.tokens.length||plan.tokens.some(t=>t.token.toLowerCase()===USDC.toLowerCase()))throw Error('Invalid input tokens');
  return [{from:plan.wallet,to:USDC,value:'0x0',data:encodeFunctionData({abi,functionName:'balanceOf',args:[plan.wallet]})},...plan.tokens.flatMap(t=>[{from:plan.wallet,to:t.token,value:'0x0',data:encodeFunctionData({abi,functionName:'balanceOf',args:[plan.wallet]})},{from:plan.wallet,to:t.token,value:'0x0',data:encodeFunctionData({abi,functionName:'allowance',args:[plan.wallet,(plan as any).executionMode==='APPROVALS_THEN_UNIVERSAL_SWAP'?UNIVERSAL_ROUTER:CLASSIC_ROUTER]})}])];
 }
 export function simulationRequest(plan:Plan){
