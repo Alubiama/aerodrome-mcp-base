@@ -21,7 +21,9 @@ const swap=decodeFunctionData({abi:parseAbi(['function swapExactTokensForTokens(
 allowance=1n;p=await run();assert.deepEqual(p.calls.slice(0,3).map(x=>x.kind),['RESET_APPROVAL','EXACT_APPROVAL','SWAP']);
 allowance=1000000n;p=await run();assert.deepEqual(p.calls.map(x=>x.kind),['SWAP','SWAP']);
 fail=true;await assert.rejects(run,/Allowance failed/);fail=false;route=false;await assert.rejects(run,/Every input/);route=true;reorg=true;await assert.rejects(run,/Block changed/);
-for(const raw of [{wallet,tokens:tokens.slice(0,1)},{wallet,tokens,provider:'KYBERSWAP'},{wallet,tokens,destination:'ETH'}])assert.equal(planInput.safeParse(raw).success,false);
+for(const raw of [{wallet,tokens:[]},{wallet,tokens,provider:'KYBERSWAP'},{wallet,tokens,destination:'ETH'}])assert.equal(planInput.safeParse(raw).success,false);
+const single=await prepareBasketPlan({wallet,tokens:tokens.slice(0,1)},signal,rt);
+assert.equal(single.tokens.length,1);assert.deepEqual(single.calls.map(x=>x.kind),['SWAP']);
 console.log('PASS unsigned plan: calldata, exact/reset/existing allowances, recipient, minimum, deadline, failed routes/reads, reorg and strict inputs. No provider traffic or execution.');
 reorg=false;reads=0;
 const partial=await prepareBasketPlan({wallet,tokens,amounts:{[tokens[0]]:'1000',[tokens[1]]:'2000'}},signal,rt);

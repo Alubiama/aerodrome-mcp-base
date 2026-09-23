@@ -5,6 +5,10 @@ const bal=(n:bigint)=>({status:'0x1',returnData:'0x'+n.toString(16).padStart(64,
 const ok=()=>[{calls:[bal(1000000n),bal(1000n),bal(0n),bal(1000n),bal(0n),{status:'0x1',gasUsed:'0x5208'},bal(3100000n),bal(900n),bal(0n),bal(900n),bal(0n)]}];
 const req:any=simulationRequest(plan);assert.equal(req.method,'eth_simulateV1');assert.equal(req.params[0].blockStateCalls[0].calls.length,11);assert.equal(req.params[0].validation,false);assert.equal(req.params[0].blockStateCalls[0].stateOverrides,undefined);
 const got=analyzeBasketSimulation(plan,ok());assert.equal(got.receivedUsdc,'2.1');assert.equal(got.gasUsedRaw,'21000');assert.equal(got.executable,false);assert.equal(got.inputEffects.length,2);
+const one={...plan,tokens:plan.tokens.slice(0,1)};
+const oneCalls=[bal(1000000n),bal(1000n),bal(0n),{status:'0x1',gasUsed:'0x5208'},bal(3100000n),bal(900n),bal(0n)];
+assert.equal((simulationRequest(one).params[0] as any).blockStateCalls[0].calls.length,7);
+assert.equal(analyzeBasketSimulation(one,[{calls:oneCalls}]).receivedUsdc,'2.1');
 assert.throws(()=>analyzeBasketSimulation(plan,[]),/count/);
 for(let i=0;i<11;i++){const bad:any=ok();bad[0].calls[i].status='0x0';assert.throws(()=>analyzeBasketSimulation(plan,bad),/failed/);}
 for(const n of [899n,901n]){const bad:any=ok();bad[0].calls[7]=bal(n);assert.throws(()=>analyzeBasketSimulation(plan,bad),/debit/);}
