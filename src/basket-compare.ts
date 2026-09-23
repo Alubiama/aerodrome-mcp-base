@@ -2,10 +2,11 @@ import {formatUnits,parseUnits} from 'viem';
 import {planInput} from './basket-plan.js';
 import {prepareUniversalBasketPlan} from './universal-plan.js';
 import {simulateBasketPlan} from './basket-simulation.js';
-import {estimateBasketValue} from './basket-value.js';
+import {estimateBasketValue,readBasketFeePricing} from './basket-value.js';
 import {makeClient} from './client.js';
 import {publicConfig} from './config.js';
 import type {BasketRuntime} from './basket.js';
+import {publicActionsL2} from 'viem/op-stack';
 
 type CandidateResult={tokens:string[];excluded:string[];status:'ESTIMATED'|'UNKNOWN'|'UNVERIFIED';grossUsdc:string|null;networkFeeUsdc:string|null;netUsdc:string|null;gasPriceWei:string|null;priceUsdcPerEth:string|null;expiresAt:string|null;reason:string|null};
 export const compareInput=planInput.refine(x=>x.tokens.length>=2&&x.tokens.length<=5,{message:'Select 2–5 input tokens to compare.'}).refine(x=>!x.tokens.some(t=>t.toLowerCase()==='0x833589fcD6eDb6e08f4c7c32d4f71b54bdA02913'.toLowerCase()),{message:'USDC is already the output asset.'});
@@ -33,6 +34,8 @@ export async function compareBasketCandidates(raw:unknown,signal:AbortSignal){
  if(await client.getChainId()!==8453)throw Error('Wrong chain');
  const block=await client.getBlock();
  if(!block.hash)throw Error('Anchor block unavailable');
+ const feeClient=client.extend(publicActionsL2());
+ const pricing=await readBasketFeePricing(client,block,signal);
  const pinned=new Proxy(client,{get(target,key){
   if(key==='getBlock')return (args:any)=>args?target.getBlock(args):Promise.resolve(block);
   return Reflect.get(target,key);
@@ -48,7 +51,7 @@ export async function compareBasketCandidates(raw:unknown,signal:AbortSignal){
    if(plan.blockHash.toLowerCase()!==block.hash.toLowerCase())throw Error('Quote anchor drift');
    const sim=await simulateBasketPlan(plan,signal);
    if(sim.blockTag.toLowerCase()!==block.hash.toLowerCase())throw Error('Simulation anchor drift');
-   const value=await estimateBasketValue(plan,sim,signal);
+   const value=await estimateBasketValue(plan,sim,signal,feeClient,pricing);
    rows.push({tokens,excluded,status:value.status,grossUsdc:sim.receivedUsdc,networkFeeUsdc:value.estimatedNetworkFeeUsdc,netUsdc:value.estimatedNetUsdc,gasPriceWei:value.gasPriceWei,priceUsdcPerEth:value.priceUsdcPerEth,expiresAt:plan.expiresAt,reason:value.reason});
   }catch(error){
    if(signal.aborted)throw error;
