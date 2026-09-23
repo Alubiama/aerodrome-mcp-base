@@ -2,7 +2,7 @@ import {validateUniversalPlan} from './plan-guard.js';
 import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
 (() => {
  const $=s=>document.querySelector(s), wallet=$('#w'), manual=$('#m'), result=$('#r'), error=$('#e');
- const WETH='0x4200000000000000000000000000000000000006';
+ const WETH='0x4200000000000000000000000000000000000006',USDC='0x833589fcD6eDb6e08f4c7c32d4f71b54bdA02913'.toLowerCase();
  let amounts=new Map();
  let inventory=null, selected=new Set(), kept=new Set(), filter='all', destination='USDC', controller, sequence=0, expiry, busy=false;
  const address=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x)&&!/^0x0{40}$/i.test(x);
@@ -54,8 +54,13 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
   panel.append(el('p','YOUR COLLECTION','eyebrow'),el('div',`${selected.size} token${selected.size===1?'':'s'} selected`,'meta'),el('p',known.length<chosen.length?'Known selected value':'Estimated selected value','meta'),el('div',selected.size?(known.length?(sum>0&&sum<.01?'~<$0.01':'~$'+sum.toLocaleString('en-US',{maximumFractionDigits:2})):'Unknown'):'$0.00','collection-total'));
   if(known.length<chosen.length)panel.append(el('p',`${chosen.length-known.length} selected token(s) have unknown value.`,'meta'));
   panel.append(el('p','Route · Aerodrome','route-label'),el('p','Classic pools only · before gas','meta'),controls,el('p','Review only. No approvals or swaps are sent.','meta'));
-  const simulate=el('button',busy?'Checking…':'Simulate sequence','prepare');simulate.disabled=busy||destination!=='USDC'||selected.size<2||selected.size>5;simulate.onclick=()=>plan(true);
-  const prepare=el('button',busy?'Checking…':'Prepare plan','prepare');prepare.disabled=busy||destination!=='USDC'||selected.size<2||selected.size>5;prepare.onclick=()=>plan(false);panel.append(prepare,simulate,el('p','Unsigned plan: select 2–5 tokens → USDC. Slippage 0.5%.','meta'));
+  const canCheck=destination==='USDC'&&selected.size>=2&&selected.size<=5&&!selected.has(USDC);
+  const simulate=el('button',busy?'Checking…':'Simulate sequence','prepare');simulate.disabled=busy||!canCheck;simulate.onclick=()=>plan(true);
+  const prepare=el('button',busy?'Checking…':'Prepare plan','prepare');prepare.disabled=busy||!canCheck;prepare.onclick=()=>plan(false);
+  const compare=el('button',busy?'Comparing…':'Compare what to include','prepare');compare.disabled=busy||!canCheck;compare.onclick=compareSelection;
+  const advanced=el('details','','advanced-actions');advanced.append(el('summary','Advanced route checks'),prepare,simulate);
+  panel.append(compare,advanced,el('p','Comparison tests the full set and each one-token omission.','meta'));
+  if(destination==='USDC'&&selected.has(USDC))panel.append(el('p','USDC is already the output asset. Deselect it to compare or simulate.','meta'));
   result.append(inventoryMain,panel);
  }
  async function load(more=false){
@@ -98,6 +103,27 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
    if(simulate){const sim=data.sequenceSimulation;if(sim?.status!=='SEQUENCE_SIMULATED'||sim.planId!==data.planId||sim.executable!==false)throw Error('Simulation could not be verified.');box.append(el('p',`Simulated output: ${sim.receivedUsdc} USDC`),el('p',`Sequence gas: ${sim.gasUsedRaw} units across approvals and swap.`,'meta'));const value=data.valueDecision;if(value?.status==='ESTIMATED'&&value.grossUsdc===sim.receivedUsdc&&typeof value.estimatedNetUsdc==='string'&&typeof value.estimatedNetworkFeeUsdc==='string'){box.append(el('b',value.worthCollecting?'Worth collecting? Estimated yes':'Worth collecting? Estimated no'),el('p',`Estimated network cost: ${short(value.estimatedNetworkFeeUsdc)} USDC`),el('p',`Estimated after network cost: ${short(value.estimatedNetUsdc)} USDC`),el('p','This is a time-sensitive estimate, not a guaranteed payout. Real wallet execution and full affordability remain unverified.','meta'))}else box.append(el('b','Worth collecting? Unknown'),el('p',value?.reason||'A complete network fee estimate is unavailable.','meta'))}
    const detail=el('details');detail.append(el('summary','Inspect unsigned calls'),el('pre',JSON.stringify(data,null,2)));box.append(detail);result.querySelector('.collection').append(box);
    expiry=setTimeout(()=>box.replaceChildren(el('b','Plan expired'),el('p','Prepare a fresh plan.','meta')),Math.max(0,expires-Date.now()));
+  }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;render()}
+ }
+ async function compareSelection(){
+  let limits;try{limits=selectedAmounts()}catch(e){error.textContent=e.message;return}
+  invalidate();const n=sequence,w=inventory.wallet,tokens=[...selected];controller=new AbortController();busy=true;error.textContent='';render();
+  try{
+   const response=await fetch('/api/basket/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits}),signal:controller.signal}),data=await response.json();if(n!==sequence)return;
+   const expected=[tokens,...tokens.map((_,i)=>tokens.filter((__,j)=>j!==i))];
+   if(!response.ok||!same(data.wallet,w)||data.chainId!==8453||data.destination!=='USDC'||data.provider!=='AERODROME'||data.executable!==false||!/^0x[0-9a-f]{64}$/i.test(data.anchorBlockHash)||!Array.isArray(data.candidates)||data.candidates.length!==expected.length||!['COMPLETE_SAMPLED','PARTIAL_SAMPLED','INCOMPARABLE'].includes(data.status))throw Error('Comparison unavailable. Request a fresh check.');
+   for(let i=0;i<expected.length;i++){
+    const row=data.candidates[i];if(!Array.isArray(row.tokens)||row.tokens.length!==expected[i].length||!row.tokens.every((x,j)=>same(x,expected[i][j]))||!['ESTIMATED','UNKNOWN','UNVERIFIED'].includes(row.status))throw Error('Comparison identity mismatch.');
+    if(row.status==='ESTIMATED'&&(typeof row.netUsdc!=='string'||!/^[-]?\d+(\.\d{1,6})?$/.test(row.netUsdc)||!Number.isFinite(Date.parse(row.expiresAt))))throw Error('Comparison value unavailable.');
+   }
+   busy=false;render();const box=el('section','','quote');box.append(el('b','What is worth including?'),el('p',`Read-only snapshot · Base block ${data.anchorBlockNumber}`,'meta'));
+   box.append(el('p',data.status==='COMPLETE_SAMPLED'?'All sampled options verified at the same block.':data.status==='PARTIAL_SAMPLED'?'Some options could not be verified. The order below covers verified options only.':'Results cannot be compared reliably. Review each result and try again.','meta'));
+   const rows=data.status==='INCOMPARABLE'?data.candidates:data.ranked.map(x=>({...data.candidates.find(row=>row.tokens.length===x.tokens.length&&row.tokens.every((t,i)=>same(t,x.tokens[i]))),deltaVsFullUsdc:x.deltaVsFullUsdc})).filter(x=>Array.isArray(x.tokens));
+   for(const [index,row] of rows.entries()){const names=row.tokens.map(t=>inventory.rows.find(x=>same(x.token,t))?.symbol||`${t.slice(0,6)}…`).join(' + '),line=el('div','','quote-row');line.append(el('b',`${data.status==='INCOMPARABLE'?'':`${index+1}. `}${names}`),el('span',row.status==='ESTIMATED'?`${short(row.netUsdc)} USDC net est.`:row.status==='UNKNOWN'?'Network cost unknown':'Could not verify'));if(row.excluded.length){const omitted=row.excluded.map(t=>inventory.rows.find(x=>same(x.token,t))?.symbol||`${t.slice(0,6)}…`).join(', '),delta=row.deltaVsFullUsdc,impact=typeof delta==='string'&&/^[-]?\d+(\.\d{1,6})?$/.test(delta)&&delta!=='0'?(delta.startsWith('-')?`Omitting it lowered the same-block net estimate by ${short(delta.slice(1))} USDC.`:`Omitting it raised the same-block net estimate by ${short(delta)} USDC.`):'This tests whether including it improves the after-fee result.';line.append(el('p',`Omitted: ${omitted}. ${impact}`,'meta'))}box.append(line)}
+   if(data.status==='PARTIAL_SAMPLED'){for(const row of data.candidates.filter(x=>x.status!=='ESTIMATED'))box.append(el('p',`${row.tokens.map(t=>inventory.rows.find(x=>same(x.token,t))?.symbol||`${t.slice(0,6)}…`).join(' + ')}: ${row.status==='UNKNOWN'?'Network cost unknown':'Could not verify'}. Not ranked.`,'meta'))}
+   box.append(el('p','Only the full selection and each one-token omission were tested. Other subsets may do better. Estimates can expire or change; no wallet execution was verified. Sending is disabled.','meta'));
+   result.querySelector('.collection').append(box);
+   const times=data.candidates.filter(x=>x.status==='ESTIMATED').map(x=>Date.parse(x.expiresAt)).filter(Number.isFinite);if(times.length)expiry=setTimeout(()=>box.append(el('p','Snapshot expired. Compare again for fresh estimates.','bad')),Math.max(0,Math.min(...times)-Date.now()));
   }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;render()}
  }
  const providers=[],providerSelect=$('#wallet-provider'),connect=$('#connect'),disconnect=$('#disconnect'),walletStatus=$('#wallet-status');

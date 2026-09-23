@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "demo": "node --import tsx src/demo.ts",
     "build": "tsc",
-    "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts && node --import tsx src/basket-value-test.ts",
+    "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts && node --import tsx src/basket-value-test.ts && node --import tsx src/basket-compare-test.ts",
     "test:security": "node --import tsx src/request-admission-test.ts && node --import tsx src/plan-guard-test.ts && node --import tsx src/universal-plan-test.ts"
   },
   "dependencies": {

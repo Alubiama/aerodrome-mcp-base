@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {compareInput,leaveOneOutCandidates,summarizeBasketComparison} from './basket-compare.js';
+
+const tokens=['A','B','C'];
+assert.deepEqual(leaveOneOutCandidates(tokens),[['A','B','C'],['B','C'],['A','C'],['A','B']]);
+assert.throws(()=>leaveOneOutCandidates(['A','a']),/distinct/);
+assert.throws(()=>leaveOneOutCandidates(['A']),/2–5/);
+assert.equal(leaveOneOutCandidates(['A','B','C','D','E']).length,6);
+assert.equal(compareInput.safeParse({wallet:'0x0000000000000000000000000000000000000001',tokens:['0x0000000000000000000000000000000000000002']}).success,false);
+assert.equal(compareInput.safeParse({wallet:'0x0000000000000000000000000000000000000001',tokens:['0x0000000000000000000000000000000000000002','0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913']}).success,false);
+const future=new Date(Date.now()+30000).toISOString();
+const row=(selected:string[],net:string,status:'ESTIMATED'|'UNKNOWN'|'UNVERIFIED'='ESTIMATED')=>({tokens:selected,excluded:tokens.filter(x=>!selected.includes(x)),status,grossUsdc:'1',networkFeeUsdc:'0.1',netUsdc:net,gasPriceWei:'6000000',priceUsdcPerEth:'2500',expiresAt:future,reason:null});
+const rows=[row(tokens,'0.02'),row(['B','C'],'0.03'),row(['A','C'],'-0.01'),row(['A','B'],'0.01')];
+let result=summarizeBasketComparison(rows);
+assert.equal(result.status,'COMPLETE_SAMPLED');
+assert.deepEqual(result.ranked.map(x=>x.estimatedNetUsdc),['0.03','0.02','0.01']);
+assert.deepEqual(result.ranked.map(x=>x.deltaVsFullUsdc),['0.01','0','-0.01']);
+result=summarizeBasketComparison([rows[0],{...rows[1],status:'UNVERIFIED',netUsdc:null,expiresAt:null}]);
+assert.equal(result.status,'PARTIAL_SAMPLED');assert.equal(result.ranked.length,1);
+result=summarizeBasketComparison([rows[0],{...rows[1],gasPriceWei:'7000000'}]);
+assert.equal(result.status,'INCOMPARABLE');assert.equal(result.ranked.length,0);
+result=summarizeBasketComparison(rows,Date.parse(future)+1);
+assert.equal(result.status,'INCOMPARABLE');assert.equal(result.ranked.length,0);
+result=summarizeBasketComparison([{...rows[0],status:'UNKNOWN',netUsdc:null}]);
+assert.equal(result.status,'INCOMPARABLE');assert.equal(result.ranked.length,0);
+console.log('PASS basket sampled comparison: full and each omission, ranked net values, partial failures, fee drift, expiry, unknown. No global-optimum claim.');
