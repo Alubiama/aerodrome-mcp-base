@@ -1,5 +1,7 @@
+import {RequestAdmission} from './request-admission.js';
 import {prepareAndSimulateBasket} from './basket-simulation.js';
-import {prepareBasketPlan,planInput} from './basket-plan.js';
+import {planInput} from './basket-plan.js';
+import {prepareUniversalBasketPlan} from './universal-plan.js';
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -17,7 +19,7 @@ export function validatePublicOrigin(value:string){
 type OverviewReader = (input: WalletOverviewInput, signal: AbortSignal) => Promise<unknown>;
 export function createOverviewWebServer(options: { read?: OverviewReader; deadlineMs?: number; publicOrigin?: string } = {}) {
   const publicOrigin=options.publicOrigin?validatePublicOrigin(options.publicOrigin):undefined;
-  let active = 0;
+  const admission=new RequestAdmission();
   const read: OverviewReader = options.read ?? ((input, signal) => {
     // Public defaults only: never inherit a local wallet, gauges or history.
     const cfg = publicConfig();
@@ -39,7 +41,7 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://rpc.wallet.coinbase.com https://mainnet.base.org; frame-src https://keys.coinbase.com; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'none'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     const port = (server.address() as { port?: number } | null)?.port;
     const allowedHosts = publicOrigin?[new URL(publicOrigin).host]:[`127.0.0.1:${port}`, `localhost:${port}`];
     const host = req.headers.host ?? "";
@@ -55,16 +57,17 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
       let input:unknown;
       try {input=(url.pathname.endsWith('/inventory')?inventoryInput:(url.pathname.endsWith('/plan')||url.pathname.endsWith('/simulate'))?planInput:basketQuoteInput).parse(JSON.parse(body));}
       catch {error(res,400,'INVALID_BASKET','Enter a valid wallet and up to 16 unique token addresses. Select USDC or ETH.');return;}
-      if(active>=2){error(res,429,'BUSY','Two checks are already running.');return;}
-      active++;const controller=new AbortController();let timedOut=false;
-      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??120000);
+      const release=admission.acquire(req.socket.remoteAddress??'unknown');
+      if(!release){res.setHeader('Retry-After','60');error(res,429,'BUSY','Request limit reached. Wait before trying again.');return;}
+      const controller=new AbortController();let timedOut=false;
+      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??30000);
       const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);
       try {
         const stopped=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(Error('Aborted')),{once:true}));
-        const reader=url.pathname.endsWith('/inventory')?readBasketInventory:url.pathname.endsWith('/plan')?prepareBasketPlan:url.pathname.endsWith('/simulate')?prepareAndSimulateBasket:quoteBasket;
+        const reader=url.pathname.endsWith('/inventory')?readBasketInventory:url.pathname.endsWith('/plan')?prepareUniversalBasketPlan:url.pathname.endsWith('/simulate')?prepareAndSimulateBasket:quoteBasket;
         const result=await Promise.race([reader(input,controller.signal),stopped]);json(res,200,result);
       } catch (e) {if(e instanceof InventoryChangedError){error(res,409,'INVENTORY_CHANGED','The token list changed. Reload from the first page.');return;}error(res,timedOut?504:502,'BASKET_UNAVAILABLE',timedOut?'The basket check timed out. Try fewer tokens.':'The basket could not be verified. No balance or quote should be assumed.');}
-      finally {clearTimeout(timer);res.off('close',disconnect);active--;}
+      finally {clearTimeout(timer);res.off('close',disconnect);release();}
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/demo") {
@@ -87,11 +90,11 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
         if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some(key => key !== "wallet") || typeof raw.wallet !== "string") throw new Error();
         input = walletOverviewInputSchema.parse({ wallet: raw.wallet.trim() });
       } catch { error(res, 400, "INVALID_WALLET", "Enter a valid nonzero address: 0x followed by 40 hexadecimal characters."); return; }
-      if (active >= 2) { error(res, 429, "BUSY", "Two checks are already running. Wait for them to finish."); return; }
-      active++;
+      const release=admission.acquire(req.socket.remoteAddress??"unknown");
+      if(!release){res.setHeader("Retry-After","60");error(res,429,"BUSY","Request limit reached. Wait before trying again.");return;}
       const controller = new AbortController();
       let timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, options.deadlineMs ?? 120_000);
+      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, options.deadlineMs ?? 30_000);
       const disconnect = () => { if (!res.writableEnded) controller.abort(); };
       res.once("close", disconnect);
       try {
@@ -101,12 +104,12 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
         json(res, 200, { source: "LIVE_RPC", report });
       } catch {
         error(res, timedOut ? 504 : 502, timedOut ? "DEADLINE" : "READ_FAILED", timedOut ? "The Base RPC deadline was reached. Please try again later." : "Could not obtain consistent Base data. This does not mean a zero balance. Please try again later.");
-      } finally { clearTimeout(timer); res.off("close", disconnect); active--; }
+      } finally { clearTimeout(timer); res.off("close", disconnect); release(); }
       return;
     }
     const files: Record<string, [string, string]> = {
       "/": ["index.html", "text/html"], "/app.js": ["app.js", "text/javascript"], "/styles.css": ["styles.css", "text/css"],
-      '/basket':['basket.html','text/html'],'/base-account-sdk.js':['../node_modules/@base-org/account/dist/base-account.min.js','text/javascript'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css']
+      '/basket':['basket.html','text/html'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/plan-guard.js':['plan-guard.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css']
     };
     if ((req.method === "GET" || req.method === "HEAD") && Object.hasOwn(files, url.pathname)) {
       const [filename, mime] = files[url.pathname];

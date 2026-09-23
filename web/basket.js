@@ -1,3 +1,4 @@
+import {validateUniversalPlan} from './plan-guard.js';
 import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
 (() => {
  const $=s=>document.querySelector(s), wallet=$('#w'), manual=$('#m'), result=$('#r'), error=$('#e');
@@ -11,7 +12,7 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
  const storageKey=()=>`aero-basket-kept:${wallet.value.trim().toLowerCase()}:8453`;
  function readKept(){try{const a=JSON.parse(localStorage.getItem(storageKey())||'[]');kept=new Set(Array.isArray(a)?a.filter(address).map(x=>x.toLowerCase()):[])}catch{kept=new Set();error.textContent='Keep storage is unavailable. Changes will last only this session.'}}
  function saveKept(){try{localStorage.setItem(storageKey(),JSON.stringify([...kept]))}catch{error.textContent='Keep storage is unavailable. Changes will last only this session.'}}
- function short(value){if(typeof value!=='string'||!/^\d+(\.\d+)?$/.test(value))return 'Unknown';const [a,b='']=value.split('.');const tail=b.slice(0,6).replace(/0+$/,'');if(a==='0'&&!tail&&/[1-9]/.test(b))return '<0.000001';return a+(tail?'.'+tail:'')}
+ function short(value){if(typeof value!=='string'||!/^[-]?\d+(\.\d+)?$/.test(value))return 'Unknown';const sign=value.startsWith('-')?'-':'';const [a,b='']=value.replace(/^-/,'').split('.');const tail=b.slice(0,6).replace(/0+$/,'');if(a==='0'&&!tail&&/[1-9]/.test(b))return sign+'<0.000001';return sign+a+(tail?'.'+tail:'')}
  function eligible(row){try{return !row.suspectedSpam&&address(row.token)&&row.status==='OBSERVED'&&row.amountRaw!==null&&BigInt(row.amountRaw)>0n&&Number.isInteger(row.decimals)&&row.decimals>=0&&row.decimals<=36&&!kept.has(row.token.toLowerCase())}catch{return false}}
  function invalidate(){error.textContent='';controller?.abort();sequence++;clearTimeout(expiry);result.querySelector('.quote')?.remove();busy=false}
  function reset(){invalidate();inventory=null;selected.clear();amounts.clear();$('#mc').textContent=`${manualTokens().length} / 16`;result.textContent='Load a wallet to view available tokens.'}
@@ -90,32 +91,33 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
    const response=await fetch(simulate?'/api/basket/simulate':'/api/basket/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits}),signal:controller.signal}),data=await response.json();if(n!==sequence)return;
    const expires=Date.parse(data.expiresAt);
    if(!response.ok||!same(data.wallet,w)||data.chainId!==8453||data.destination!=='USDC'||data.provider!=='AERODROME'||data.executable!==false||data.simulation?.status!=='NOT_SIMULATED'||!Array.isArray(data.tokens)||data.tokens.length!==tokens.length||new Set(data.tokens.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.tokens.every(x=>tokens.some(t=>same(t,x.token))&&x.amountRaw===limits[x.token.toLowerCase()])||!Array.isArray(data.calls)||!Number.isFinite(expires)||expires<=Date.now())throw Error('Plan unavailable. Every input needs a fresh positive route to USDC.');
-   busy=false;render();const box=el('section','','quote');box.append(el('b',simulate?'Sequence simulated · sending disabled':'Unsigned plan · not simulated'),el('p',`Minimum: ${short(data.minimumOutput)} USDC before gas`),el('p',`${data.calls.filter(x=>x.kind==='SWAP').length} swaps · ${data.calls.filter(x=>x.kind!=='SWAP').length} approval calls · 0.5% slippage`,'meta'),el('p','Sending is unavailable until the complete batch passes simulation.','meta'));
+   validateUniversalPlan(data,{wallet:w,tokens,amounts:limits});
+   busy=false;render();const box=el('section','','quote');box.append(el('b',simulate?'Sequence simulated · sending disabled':'Unsigned plan · not simulated'),el('p',`Minimum: ${short(data.minimumOutput)} USDC before gas`),el('p',`1 basket swap · ${data.calls.filter(x=>x.kind!=='UNIVERSAL_SWAP').length} permission calls · 0.5% slippage`,'meta'),el('p','Permissions come first, then one basket swap. Sending is disabled during verification.','meta'));
    for(const token of data.tokens)box.append(el('p',`${token.amountFormatted} ${token.symbol||token.token} → USDC`));
    box.append(el('p',`Recipient: ${data.wallet}`,'meta'));
-   if(simulate){const sim=data.sequenceSimulation;if(sim?.status!=='SEQUENCE_SIMULATED'||sim.planId!==data.planId||sim.executable!==false)throw Error('Simulation could not be verified.');box.append(el('p',`Simulated output: ${sim.receivedUsdc} USDC`),el('p',`Sequence gas: ${sim.gasUsedRaw} units. Full fee and net after fees: unavailable.`,'meta'),el('p','Wallet atomic execution: not simulated. This result covers sequential calls only.','meta'))}
+   if(simulate){const sim=data.sequenceSimulation;if(sim?.status!=='SEQUENCE_SIMULATED'||sim.planId!==data.planId||sim.executable!==false)throw Error('Simulation could not be verified.');box.append(el('p',`Simulated output: ${sim.receivedUsdc} USDC`),el('p',`Sequence gas: ${sim.gasUsedRaw} units across approvals and swap.`,'meta'));const value=data.valueDecision;if(value?.status==='ESTIMATED'&&value.grossUsdc===sim.receivedUsdc&&typeof value.estimatedNetUsdc==='string'&&typeof value.estimatedNetworkFeeUsdc==='string'){box.append(el('b',value.worthCollecting?'Worth collecting? Estimated yes':'Worth collecting? Estimated no'),el('p',`Estimated network cost: ${short(value.estimatedNetworkFeeUsdc)} USDC`),el('p',`Estimated after network cost: ${short(value.estimatedNetUsdc)} USDC`),el('p','This is a time-sensitive estimate, not a guaranteed payout. Real wallet execution and full affordability remain unverified.','meta'))}else box.append(el('b','Worth collecting? Unknown'),el('p',value?.reason||'A complete network fee estimate is unavailable.','meta'))}
    const detail=el('details');detail.append(el('summary','Inspect unsigned calls'),el('pre',JSON.stringify(data,null,2)));box.append(detail);result.querySelector('.collection').append(box);
    expiry=setTimeout(()=>box.replaceChildren(el('b','Plan expired'),el('p','Prepare a fresh plan.','meta')),Math.max(0,expires-Date.now()));
   }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;render()}
  }
- const providers=[{name:'Base Account / Coinbase Wallet',provider:null}],providerSelect=$('#wallet-provider'),connect=$('#connect'),disconnect=$('#disconnect'),walletStatus=$('#wallet-status');
+ const providers=[],providerSelect=$('#wallet-provider'),connect=$('#connect'),disconnect=$('#disconnect'),walletStatus=$('#wallet-status');
  const session=new WalletSession(state=>{
   reset();disconnect.hidden=!session.provider;connect.disabled=state.status==='connecting'||providers.length===0;
   if(state.status==='connecting')walletStatus.textContent='Waiting for wallet connection…';
   else if(state.status==='connected'){
    wallet.value=state.account;
-   const capability=state.atomic==='supported'?'Atomic batches reported as supported.':state.atomic==='ready'?'Atomic batches require a wallet upgrade; no upgrade requested.':state.atomic==='unsupported'?'This wallet does not support atomic batches.':'Atomic batch support could not be verified.';
-   walletStatus.textContent=`Connected on Base. ${capability} Sending remains disabled until wallet execution and full fees are verified.`;
+   const capability='No wallet upgrade required for the planned router flow. Sending is disabled.';
+   walletStatus.textContent=`Connected on Base. ${capability}`;
    load(false);
   }else if(state.status==='wrong-chain')walletStatus.textContent='Switch to Base in your wallet, then reconnect. No network switch was requested.';
   else if(state.status==='changed')walletStatus.textContent='Wallet account or network changed. Reconnect to refresh balances and capabilities.';
   else if(state.status==='error')walletStatus.textContent=state.message;
   else walletStatus.textContent='Disconnected locally. Existing wallet permissions are unchanged.';
  });
- const baseOption=el('option','Base Account / Coinbase Wallet');baseOption.value='0';providerSelect.append(baseOption);connect.disabled=false;walletStatus.textContent='Connect with Base Account or choose a browser wallet. No signing.';
- discoverWallets(window,item=>{providers.push(item);const option=el('option',item.name);option.value=String(providers.length-1);providerSelect.append(option);connect.disabled=session.state.status==='connecting';if(session.state.status==='disconnected')walletStatus.textContent='Connect to check your account and atomic batch support. No signing.'});
+ connect.disabled=true;
+ discoverWallets(window,item=>{providers.push(item);const option=el('option',item.name);option.value=String(providers.length-1);providerSelect.append(option);connect.disabled=session.state.status==='connecting';if(session.state.status==='disconnected')walletStatus.textContent='Connect to check your account. No signing.'});
  if(!providers.length)walletStatus.textContent='No browser wallet detected. Open this app in a wallet-enabled browser. You can still load an address.';
- connect.onclick=()=>{const item=providers[Number(providerSelect.value)];if(!item)return;try{if(!item.provider){if(typeof window.createBaseAccountSDK!=='function')throw Error();item.provider=window.createBaseAccountSDK({appName:'Collect',appLogoUrl:new URL('/collect.svg',location.href).href,appChainIds:[8453],preference:{telemetry:false}}).getProvider()}session.connect(item.provider)}catch{walletStatus.textContent='Base Account SDK unavailable. Reload or choose a browser wallet.'}};
+ connect.onclick=()=>{const item=providers[Number(providerSelect.value)];if(item)session.connect(item.provider)};
  disconnect.onclick=()=>session.detach();
  providerSelect.onchange=()=>session.detach();
  wallet.oninput=()=>{if(session.state.status==='connected'&&!same(wallet.value.trim(),session.state.account))session.detach();else reset()};manual.oninput=reset;$('#f').onsubmit=e=>{e.preventDefault();load(false)};

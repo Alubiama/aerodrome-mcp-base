@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-09-24
+
+- Refreshed Collect and wallet overview with an independent Base-aligned visual system.
+- Added read-only basket sequence simulation and an estimated after-network-fee decision. Missing fee components return UNKNOWN.
+- Added exact Universal Router plan validation, request admission limits, and adversarial regression tests.
+- Sending stays disabled. Simulation does not verify actual wallet execution, gas affordability, token safety, or the exact deployed router’s reachable permission paths.
+
 ## 0.3.0 — 2026-09-14
 
 - Added absolute configuration/history path overrides for isolated SSH-hosted accounts and a compiled build command. The local stdio defaults are preserved.
