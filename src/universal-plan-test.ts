@@ -9,7 +9,7 @@ const code=JSON.parse(readFileSync(new URL('./fixtures/universal-code.json',impo
 const wallet='0x0000000000000000000000000000000000000001',tokens=['0x0000000000000000000000000000000000000002','0x0000000000000000000000000000000000000003'];
 const expected={wallet,tokens,amounts:{[tokens[0]]:'1000',[tokens[1]]:'2000'}};
 let allowance=0n,twoHops=false,wrongCode=false;
-const rt:any={allowQuotes:false,fetch:async()=>{throw Error('No network allowed');},client:{getChainId:async()=>8453,getCode:async(a:any)=>{assert.equal(a.blockNumber,10n);assert.equal(a.address,UNIVERSAL_ROUTER);return wrongCode?'0x00':code},getBlock:async()=>({number:10n,hash:'0xa'}),readContract:async(a:any)=>{
+const rt:any={allowQuotes:false,fetch:async()=>{throw Error('No network allowed');},client:{getChainId:async()=>8453,getCode:async(a:any)=>{assert.equal(a.blockNumber,10n);assert.equal(a.address,UNIVERSAL_ROUTER);return wrongCode?'0x00':code},getBlock:async()=>({number:10n,hash:'0x'+'a'.repeat(64)}),readContract:async(a:any)=>{
  if(a.functionName==='balanceOf')return 1000000n;
  if(a.functionName==='decimals')return 6;
  if(a.functionName==='symbol')return 'TEST';
@@ -31,6 +31,7 @@ const bad:Array<[string,(p:any)=>void]>=[
 ];
 for(const [label,fn] of bad){const p=structuredClone(good);fn(p);assert.throws(()=>validateUniversalPlan(p,expected),Error,label);passed++;}
 const request:any=simulationRequest(good);const sequence=request.params[0].blockStateCalls[0].calls;
+assert.equal(request.params[1],good.blockHash);
 assert.ok(sequence[2].data.toLowerCase().endsWith(UNIVERSAL_ROUTER.slice(2).toLowerCase().padStart(64,'0')));assert.equal(sequence[5+good.calls.length-1].data,good.calls.at(-1).data);passed++;
 wrongCode=true;await assert.rejects(run,/deployment/);passed++;
 console.log(`PASS Universal Router: ${passed} cases; code pin, permission spender, independently reconstructed ABI, command flags, inputs, recipient, path, deadline, and sending gate. No network or signing.`);
