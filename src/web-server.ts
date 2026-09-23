@@ -1,5 +1,6 @@
 import {RequestAdmission} from './request-admission.js';
 import {prepareAndSimulateBasket} from './basket-simulation.js';
+import {compareBasketCandidates,compareInput} from './basket-compare.js';
 import {planInput} from './basket-plan.js';
 import {prepareUniversalBasketPlan} from './universal-plan.js';
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -51,20 +52,20 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
     const url = new URL(req.url ?? "/", publicOrigin??`http://${host}`);
     if((req.method==='GET'||req.method==='HEAD')&&url.pathname==='/healthz'){json(res,200,{status:'ok',sendingEnabled:false});return;}
     if(publicOrigin&&url.pathname==='/'){res.writeHead(302,{Location:'/basket'});res.end();return;}
-    if (req.method === 'POST' && ['/api/basket/inventory','/api/basket/quote','/api/basket/plan','/api/basket/simulate'].includes(url.pathname)) {
+    if (req.method === 'POST' && ['/api/basket/inventory','/api/basket/quote','/api/basket/plan','/api/basket/simulate','/api/basket/compare'].includes(url.pathname)) {
       if(req.headers['content-type']?.split(';')[0].trim()!=='application/json') {error(res,415,'JSON_REQUIRED','Send JSON.');return;}
       let body='';for await(const chunk of req){body+=chunk.toString();if(Buffer.byteLength(body)>4096){error(res,413,'TOO_LARGE','Request is too large.');return;}}
       let input:unknown;
-      try {input=(url.pathname.endsWith('/inventory')?inventoryInput:(url.pathname.endsWith('/plan')||url.pathname.endsWith('/simulate'))?planInput:basketQuoteInput).parse(JSON.parse(body));}
-      catch {error(res,400,'INVALID_BASKET','Enter a valid wallet and up to 16 unique token addresses. Select USDC or ETH.');return;}
+      try {input=(url.pathname.endsWith('/inventory')?inventoryInput:url.pathname.endsWith('/compare')?compareInput:(url.pathname.endsWith('/plan')||url.pathname.endsWith('/simulate'))?planInput:basketQuoteInput).parse(JSON.parse(body));}
+      catch {error(res,400,'INVALID_BASKET',url.pathname.endsWith('/compare')?'Select 2–5 valid input tokens and an address.':'Enter a valid wallet and up to 16 unique token addresses. Select USDC or ETH.');return;}
       const release=admission.acquire(req.socket.remoteAddress??'unknown');
       if(!release){res.setHeader('Retry-After','60');error(res,429,'BUSY','Request limit reached. Wait before trying again.');return;}
       const controller=new AbortController();let timedOut=false;
-      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??30000);
+      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??(url.pathname.endsWith('/compare')?60000:30000));
       const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);
       try {
         const stopped=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(Error('Aborted')),{once:true}));
-        const reader=url.pathname.endsWith('/inventory')?readBasketInventory:url.pathname.endsWith('/plan')?prepareUniversalBasketPlan:url.pathname.endsWith('/simulate')?prepareAndSimulateBasket:quoteBasket;
+        const reader=url.pathname.endsWith('/inventory')?readBasketInventory:url.pathname.endsWith('/plan')?prepareUniversalBasketPlan:url.pathname.endsWith('/simulate')?prepareAndSimulateBasket:url.pathname.endsWith('/compare')?compareBasketCandidates:quoteBasket;
         const result=await Promise.race([reader(input,controller.signal),stopped]);json(res,200,result);
       } catch (e) {if(e instanceof InventoryChangedError){error(res,409,'INVENTORY_CHANGED','The token list changed. Reload from the first page.');return;}error(res,timedOut?504:502,'BASKET_UNAVAILABLE',timedOut?'The basket check timed out. Try fewer tokens.':'The basket could not be verified. No balance or quote should be assumed.');}
       finally {clearTimeout(timer);res.off('close',disconnect);release();}

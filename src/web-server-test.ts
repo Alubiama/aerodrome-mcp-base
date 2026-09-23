@@ -44,10 +44,11 @@ try {
   assert.equal((await fetch(`${origin}/wallet.js`)).status,200);
   assert.equal((await fetch(`${origin}/plan-guard.js`)).status,200);
   assert.equal((await fetch(`${origin}/base-account-sdk.js`)).status,404);
-  for (const route of ['inventory','quote','plan','simulate']) {
+  for (const route of ['inventory','quote','plan','simulate','compare']) {
     assert.equal((await fetch(`${origin}/api/basket/${route}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:'invalid'})})).status,400);
     assert.equal((await fetch(`${origin}/api/basket/${route}`,{method:'POST',headers:{'content-type':'application/json',origin:'https://evil.example'},body:JSON.stringify({wallet})})).status,403);
   }
+  assert.equal((await fetch(`${origin}/api/basket/compare`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet,tokens:['0x0000000000000000000000000000000000000002']})})).status,400);
   assert.equal((await fetch(`${origin}/.snapshot-history/`)).status, 404);
   assert.equal(reads, 0);
   const live = await post({ wallet }, { origin });
