@@ -8,14 +8,22 @@ const WEI=10n**18n,USDC_UNIT=10n**6n;
 type Call={to:string;data:string;value:string};
 type BasketValueInput={wallet:string;blockNumber:string;blockHash:string;expiresAt:string;calls:Call[]};
 type SimulatedValue={receivedUsdc:string;gasUsedRaw:string;callGasUsedRaw?:string[];status:string};
+export type BasketFeePricing={blockNumber:string;blockHash:string;gasPriceWei:bigint;priceUsdcPerEthRaw:bigint};
 export type ValueDecision={status:'ESTIMATED'|'UNKNOWN';reason:string|null;grossUsdc:string;estimatedNetworkFeeUsdc:string|null;estimatedNetUsdc:string|null;worthCollecting:boolean|null;feeEth:string|null;gasPriceWei:string|null;priceUsdcPerEth:string|null;asOf:string;limitations:string[]};
+export async function readBasketFeePricing(client:any,block:{number:bigint;hash:string|null},signal:AbortSignal):Promise<BasketFeePricing>{
+ if(!block.hash)throw Error('Quote block hash unavailable');
+ const [gasPrice,quote]=await Promise.all([client.getGasPrice(),classicQuote(client,QUOTE_WETH,USDC,WEI,block.number,signal)]);
+ signal.throwIfAborted();
+ if(typeof gasPrice!=='bigint'||gasPrice<=0n||!quote?.amountOut||quote.amountOut<=0n)throw Error('Fee pricing unavailable');
+ return {blockNumber:block.number.toString(),blockHash:block.hash,gasPriceWei:gasPrice,priceUsdcPerEthRaw:quote.amountOut};
+}
 export function calculateBasketValue(grossRaw:bigint,gasPriceWei:bigint,gasUnits:bigint[],l1Fees:bigint[],operatorFees:bigint[],priceUsdcPerEthRaw:bigint):{feeWei:bigint;feeUsdcRaw:bigint;netUsdcRaw:bigint}{
  if(grossRaw<0n||gasPriceWei<=0n||priceUsdcPerEthRaw<=0n||!gasUnits.length||gasUnits.length!==l1Fees.length||gasUnits.length!==operatorFees.length||[...gasUnits,...l1Fees,...operatorFees].some(x=>x<0n))throw Error('Invalid fee evidence');
  const feeWei=gasUnits.reduce((s,x)=>s+x,0n)*gasPriceWei+l1Fees.reduce((s,x)=>s+x,0n)+operatorFees.reduce((s,x)=>s+x,0n);
  const feeUsdcRaw=(feeWei*priceUsdcPerEthRaw+WEI-1n)/WEI; // round cost upward
  return {feeWei,feeUsdcRaw,netUsdcRaw:grossRaw-feeUsdcRaw};
 }
-export async function estimateBasketValue(plan:BasketValueInput,simulation:SimulatedValue,signal:AbortSignal,providedClient?:any):Promise<ValueDecision>{
+export async function estimateBasketValue(plan:BasketValueInput,simulation:SimulatedValue,signal:AbortSignal,providedClient?:any,pricing?:BasketFeePricing):Promise<ValueDecision>{
  const asOf=new Date().toISOString(),grossRaw=parseUnits(simulation.receivedUsdc,6);
  const base={grossUsdc:formatUnits(grossRaw,6),asOf,limitations:['Estimate for the selected basket only. Network fees and pool prices can change.','Approvals are separate transactions. A failed swap can still spend gas.','Simulation uses validation=false; nonce, gas affordability, wallet prompts, and transaction inclusion are unverified.']};
  const unknown=(reason:string):ValueDecision=>({status:'UNKNOWN',reason,...base,estimatedNetworkFeeUsdc:null,estimatedNetUsdc:null,worthCollecting:null,feeEth:null,gasPriceWei:null,priceUsdcPerEth:null});
@@ -30,14 +38,15 @@ export async function estimateBasketValue(plan:BasketValueInput,simulation:Simul
   if(gasUnits.reduce((s,x)=>s+x,0n)!==BigInt(simulation.gasUsedRaw))return unknown('Gas totals disagree.');
   const block=await client.getBlock({blockNumber:BigInt(plan.blockNumber)});
   if(block.number!==BigInt(plan.blockNumber)||!block.hash||block.hash.toLowerCase()!==plan.blockHash.toLowerCase())return unknown('Quote block changed.');
+  if(pricing&&(pricing.blockNumber!==plan.blockNumber||pricing.blockHash.toLowerCase()!==plan.blockHash.toLowerCase()||pricing.gasPriceWei<=0n||pricing.priceUsdcPerEthRaw<=0n))return unknown('Shared fee pricing does not match quote block.');
   const requests=plan.calls.map(c=>({account:plan.wallet as Address,to:c.to as Address,data:c.data as Hex,value:BigInt(c.value)}));
-  const [gasPrice,quote,...feeParts]=await Promise.all([client.getGasPrice(),classicQuote(client,QUOTE_WETH,USDC,WEI,block.number,feeSignal),...requests.flatMap(req=>[client.estimateL1Fee(req),client.estimateOperatorFee(req)])]);
+  const [gasPrice,quote,...feeParts]=await Promise.all([pricing?.gasPriceWei??client.getGasPrice(),pricing?.priceUsdcPerEthRaw??classicQuote(client,QUOTE_WETH,USDC,WEI,block.number,feeSignal).then(q=>q?.amountOut),...requests.flatMap(req=>[client.estimateL1Fee(req),client.estimateOperatorFee(req)])]);
   signal.throwIfAborted();
-  if(typeof gasPrice!=='bigint'||gasPrice<=0n||!quote?.amountOut)return unknown('Gas price or WETH/USDC conversion unavailable.');
+  if(typeof gasPrice!=='bigint'||gasPrice<=0n||typeof quote!=='bigint'||quote<=0n)return unknown('Gas price or WETH/USDC conversion unavailable.');
   const l1Fees=feeParts.filter((_,i)=>i%2===0) as bigint[],operatorFees=feeParts.filter((_,i)=>i%2===1) as bigint[];
   if([...l1Fees,...operatorFees].some(x=>typeof x!=='bigint'||x<0n))return unknown('Network fee component unavailable.');
-  const value=calculateBasketValue(grossRaw,gasPrice,gasUnits,l1Fees,operatorFees,quote.amountOut);
+  const value=calculateBasketValue(grossRaw,gasPrice,gasUnits,l1Fees,operatorFees,quote);
   if(Date.parse(plan.expiresAt)<=Date.now())return unknown('Estimate expired.');
-  return {status:'ESTIMATED',reason:null,...base,estimatedNetworkFeeUsdc:formatUnits(value.feeUsdcRaw,6),estimatedNetUsdc:formatUnits(value.netUsdcRaw,6),worthCollecting:value.netUsdcRaw>0n,feeEth:formatUnits(value.feeWei,18),gasPriceWei:gasPrice.toString(),priceUsdcPerEth:formatUnits(quote.amountOut,6)};
+  return {status:'ESTIMATED',reason:null,...base,estimatedNetworkFeeUsdc:formatUnits(value.feeUsdcRaw,6),estimatedNetUsdc:formatUnits(value.netUsdcRaw,6),worthCollecting:value.netUsdcRaw>0n,feeEth:formatUnits(value.feeWei,18),gasPriceWei:gasPrice.toString(),priceUsdcPerEth:formatUnits(quote,6)};
  }catch(e){if(signal.aborted)throw e;return unknown('Complete network fee estimate unavailable.');}
 }

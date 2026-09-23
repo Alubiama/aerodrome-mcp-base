@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {calculateBasketValue,estimateBasketValue} from './basket-value.js';
+import {calculateBasketValue,estimateBasketValue,readBasketFeePricing} from './basket-value.js';
 const v=calculateBasketValue(3_000_000n,2_000_000_000n,[100_000n,200_000n],[10_000_000_000_000n,20_000_000_000_000n],[1_000_000_000_000n,1_000_000_000_000n],2_000_000_000n);
 assert.equal(v.feeWei,632_000_000_000_000n);assert.equal(v.feeUsdcRaw,1_264_000n);assert.equal(v.netUsdcRaw,1_736_000n);
 assert.equal(calculateBasketValue(100n,2_000_000_000n,[100_000n],[0n],[0n],2_000_000_000n).netUsdcRaw<0n,true);
@@ -10,6 +10,15 @@ const simulation:any={status:'SEQUENCE_SIMULATED',receivedUsdc:'3',gasUsedRaw:'1
 const client:any={getBlock:async()=>({number:10n,hash:blockHash}),getGasPrice:async()=>2_000_000_000n,readContract:async({functionName,args}:any)=>functionName==='getAmountsOut'?[args[0],2_000_000_000n]:undefined,estimateL1Fee:async()=>10_000_000_000_000n,estimateOperatorFee:async()=>1_000_000_000_000n};
 const signal=new AbortController().signal;
 let result=await estimateBasketValue(plan,simulation,signal,client);assert.equal(result.status,'ESTIMATED');assert.equal(result.estimatedNetUsdc,'2.9776');assert.equal(result.worthCollecting,true);
+let priceReads=0;
+const sharedClient={...client,getGasPrice:async()=>{priceReads++;return 2_000_000_000n},readContract:async(args:any)=>{priceReads++;return client.readContract(args)}};
+const shared=await readBasketFeePricing(sharedClient,{number:10n,hash:blockHash},signal);
+assert.equal(priceReads,2);
+result=await estimateBasketValue(plan,simulation,signal,sharedClient,shared);
+assert.equal(result.status,'ESTIMATED');assert.equal(result.estimatedNetUsdc,'2.9776');assert.equal(priceReads,2,'shared pricing is reused without fresh gas or ETH price reads');
+result=await estimateBasketValue(plan,simulation,signal,sharedClient,{...shared,blockHash:'0x'+'cd'.repeat(32)});
+assert.equal(result.status,'UNKNOWN');assert.equal(result.reason,'Shared fee pricing does not match quote block.');
+assert.equal(priceReads,2);
 result=await estimateBasketValue(plan,{...simulation,callGasUsedRaw:[]},signal,client);assert.equal(result.status,'UNKNOWN');
 result=await estimateBasketValue(plan,simulation,signal,{...client,estimateL1Fee:async()=>{throw Error('unavailable')}});assert.equal(result.status,'UNKNOWN');
 result=await estimateBasketValue(plan,simulation,signal,{...client,getBlock:async()=>({number:10n,hash:'0x'+'cd'.repeat(32)})});assert.equal(result.status,'UNKNOWN');assert.equal(result.reason,'Quote block changed.');
