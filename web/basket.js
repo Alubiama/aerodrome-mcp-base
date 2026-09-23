@@ -12,6 +12,12 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
  const storageKey=()=>`aero-basket-kept:${wallet.value.trim().toLowerCase()}:8453`;
  function readKept(){try{const a=JSON.parse(localStorage.getItem(storageKey())||'[]');kept=new Set(Array.isArray(a)?a.filter(address).map(x=>x.toLowerCase()):[])}catch{kept=new Set();error.textContent='Keep storage is unavailable. Changes will last only this session.'}}
  function saveKept(){try{localStorage.setItem(storageKey(),JSON.stringify([...kept]))}catch{error.textContent='Keep storage is unavailable. Changes will last only this session.'}}
+ const savedList=$('#saved-address-list'),savedStatus=$('#saved-address-status'),savedKey='collect:saved-addresses:8453';
+ let savedAddresses=[];
+ function readSavedAddresses(){try{const value=JSON.parse(localStorage.getItem(savedKey)||'[]');savedAddresses=Array.isArray(value)?[...new Set(value.filter(address).map(x=>x.toLowerCase()))].slice(0,10):[]}catch{savedAddresses=[];savedStatus.textContent='Saved addresses are unavailable in this browser.'}renderSavedAddresses()}
+ function persistSavedAddresses(next){try{localStorage.setItem(savedKey,JSON.stringify(next));savedAddresses=next;renderSavedAddresses();return true}catch{savedStatus.textContent='Could not save changes in this browser.';return false}}
+ function renderSavedAddresses(){savedList.replaceChildren();for(const item of savedAddresses){const row=el('div','','saved-address-row'),code=el('code',item),view=el('button','View'),remove=el('button','Remove');view.type=remove.type='button';view.setAttribute('aria-label',`View ${item}`);remove.setAttribute('aria-label',`Remove ${item}`);view.onclick=()=>{wallet.value=item;wallet.dispatchEvent(new Event('input',{bubbles:true}));manual.value='';manual.dispatchEvent(new Event('input',{bubbles:true}));load(false)};remove.onclick=()=>{if(persistSavedAddresses(savedAddresses.filter(x=>x!==item)))savedStatus.textContent='Address removed from this browser.'};row.append(code,view,remove);savedList.append(row)}}
+ $('#save-address').onclick=()=>{const item=wallet.value.trim().toLowerCase();if(!address(item)){savedStatus.textContent='Enter a valid public Base address first.';return}if(savedAddresses.includes(item)){savedStatus.textContent='This address is already saved.';return}if(savedAddresses.length>=10){savedStatus.textContent='Remove an address before saving another.';return}if(persistSavedAddresses([...savedAddresses,item]))savedStatus.textContent='Address saved in this browser.'};
  function short(value){if(typeof value!=='string'||!/^[-]?\d+(\.\d+)?$/.test(value))return 'Unknown';const sign=value.startsWith('-')?'-':'';const [a,b='']=value.replace(/^-/,'').split('.');const tail=b.slice(0,6).replace(/0+$/,'');if(a==='0'&&!tail&&/[1-9]/.test(b))return sign+'<0.000001';return sign+a+(tail?'.'+tail:'')}
  function eligible(row){try{return !row.suspectedSpam&&address(row.token)&&row.status==='OBSERVED'&&row.amountRaw!==null&&BigInt(row.amountRaw)>0n&&Number.isInteger(row.decimals)&&row.decimals>=0&&row.decimals<=36&&!kept.has(row.token.toLowerCase())}catch{return false}}
  function invalidate(){error.textContent='';controller?.abort();sequence++;clearTimeout(expiry);result.querySelector('.quote')?.remove();busy=false}
@@ -147,4 +153,5 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
  disconnect.onclick=()=>session.detach();
  providerSelect.onchange=()=>session.detach();
  wallet.oninput=()=>{if(session.state.status==='connected'&&!same(wallet.value.trim(),session.state.account))session.detach();else reset()};manual.oninput=reset;$('#f').onsubmit=e=>{e.preventDefault();load(false)};
+ readSavedAddresses();
 })();
