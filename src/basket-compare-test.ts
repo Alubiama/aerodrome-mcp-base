@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
-import {compareInput,leaveOneOutCandidates,summarizeBasketComparison} from './basket-compare.js';
+import {compareInput,leaveOneOutCandidates,mapBounded,summarizeBasketComparison} from './basket-compare.js';
 
 const tokens=['A','B','C'];
 assert.deepEqual(leaveOneOutCandidates(tokens),[['A','B','C'],['B','C'],['A','C'],['A','B']]);
 assert.throws(()=>leaveOneOutCandidates(['A','a']),/distinct/);
 assert.throws(()=>leaveOneOutCandidates(['A']),/2–5/);
 assert.equal(leaveOneOutCandidates(['A','B','C','D','E']).length,6);
+const started:number[]=[];const release=new Map<number,()=>void>();let active=0,maxActive=0;
+const bounded=mapBounded([0,1,2,3],2,new AbortController().signal,async index=>{
+ started.push(index);active++;maxActive=Math.max(maxActive,active);
+ await new Promise<void>(resolve=>release.set(index,resolve));active--;return index*10;
+});
+assert.deepEqual(started,[0,1]);
+release.get(1)!();await new Promise<void>(resolve=>setImmediate(resolve));assert.deepEqual(started,[0,1,2]);
+release.get(0)!();await new Promise<void>(resolve=>setImmediate(resolve));assert.deepEqual(started,[0,1,2,3]);
+release.get(2)!();release.get(3)!();
+assert.deepEqual(await bounded,[0,10,20,30]);assert.equal(maxActive,2);
+await assert.rejects(mapBounded([0],0,new AbortController().signal,async()=>0),/concurrency/);
 assert.equal(compareInput.safeParse({wallet:'0x0000000000000000000000000000000000000001',tokens:['0x0000000000000000000000000000000000000002']}).success,false);
 assert.equal(compareInput.safeParse({wallet:'0x0000000000000000000000000000000000000001',tokens:['0x0000000000000000000000000000000000000002','0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913']}).success,false);
 const future=new Date(Date.now()+30000).toISOString();
