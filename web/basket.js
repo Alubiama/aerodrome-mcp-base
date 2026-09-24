@@ -148,7 +148,7 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
  });
  connect.disabled=true;
  discoverWallets(window,item=>{providers.push(item);const option=el('option',item.name);option.value=String(providers.length-1);providerSelect.append(option);connect.disabled=session.state.status==='connecting';if(session.state.status==='disconnected')walletStatus.textContent='Connect to check your account. No signing.'});
- if(!providers.length)walletStatus.textContent='No browser wallet detected. Open this app in a wallet-enabled browser. You can still load an address.';
+ setTimeout(()=>{if(!providers.length)walletStatus.textContent='No browser wallet detected. Open this app in a wallet-enabled browser. You can still load an address.'},300);
  connect.onclick=()=>{const item=providers[Number(providerSelect.value)];if(item)session.connect(item.provider)};
  disconnect.onclick=()=>session.detach();
  providerSelect.onchange=()=>session.detach();

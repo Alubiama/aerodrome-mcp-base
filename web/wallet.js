@@ -32,6 +32,8 @@ export function discoverWallets(win,onWallet){
  const add=(provider,name)=>{if(!provider||typeof provider.request!=='function'||seen.has(provider))return;seen.add(provider);onWallet({provider,name:typeof name==='string'?name.slice(0,80):'Browser wallet'})};
  const announce=e=>add(e.detail?.provider,e.detail?.info?.name);
  win.addEventListener('eip6963:announceProvider',announce);win.dispatchEvent(new Event('eip6963:requestProvider'));
- add(win.ethereum,'Browser wallet');
- return ()=>win.removeEventListener('eip6963:announceProvider',announce);
+ // Give named EIP-6963 providers time to announce before using the legacy
+ // injected fallback, which may be the same Rabby provider object.
+ const fallback=setTimeout(()=>{if(!seen.size)add(win.ethereum,'Browser wallet')},250);
+ return ()=>{clearTimeout(fallback);win.removeEventListener('eip6963:announceProvider',announce)};
 }

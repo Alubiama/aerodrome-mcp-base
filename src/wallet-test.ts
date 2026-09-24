@@ -47,11 +47,18 @@ browser.addEventListener('eip6963:requestProvider',()=>{
  Object.defineProperty(event,'detail',{value:{provider:rabby,info:{name:'Rabby Wallet'}}});
  browser.dispatchEvent(event);
 });
+browser.ethereum=rabby;
 const stopDiscovery=discoverWallets(browser,(entry:{name:string;provider:any})=>discovered.push(entry));
 assert.deepEqual(discovered.map(entry=>entry.name),['Rabby Wallet']);
+await new Promise(resolve=>setTimeout(resolve,300));
+assert.deepEqual(discovered.map(entry=>entry.name),['Rabby Wallet'],'legacy injection must not mask or duplicate named Rabby');
 assert.deepEqual(rabbyRequests,[],'wallet discovery does not request an account');
 await session.connect(discovered[0].provider);
 assert.equal(session.state.status,'connected');assert.equal(session.state.atomic,'unknown');
 assert.deepEqual(rabbyRequests,['eth_requestAccounts','eth_chainId','wallet_getCapabilities','eth_accounts','eth_chainId']);
 session.detach();stopDiscovery();
+const legacyOnly=new EventTarget() as EventTarget&{ethereum?:unknown};legacyOnly.ethereum=rabby;
+const legacyNames:string[]=[];const stopLegacy=discoverWallets(legacyOnly,(entry:{name:string})=>legacyNames.push(entry.name));
+await new Promise(resolve=>setTimeout(resolve,300));
+assert.deepEqual(legacyNames,['Browser wallet'],'legacy-only wallets remain available');stopLegacy();
 console.log('PASS named EIP-6963 Rabby adapter: optional capability failure, no discovery prompt or signing. Physical extension UI remains unverified.');
