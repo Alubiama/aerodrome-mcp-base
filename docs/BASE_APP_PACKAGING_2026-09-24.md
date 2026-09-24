@@ -20,7 +20,7 @@ Status: **web preview preparation only**. Collect is not registered or verified 
 
 ## Next verification gates
 
-1. Release the merged read-only build to its public HTTPS origin; confirm the actual public HTML, API, mobile behavior and no-send boundary unauthenticated.
+1. Manually release the merged read-only build to its public HTTPS origin. Compare `/healthz` `releaseCommit` with the chosen Git SHA and confirm `sendingEnabled:false`, then verify the actual public HTML, API, and mobile behavior unauthenticated. The commit field uses Render's documented runtime `RENDER_GIT_COMMIT`; a missing or mismatched field is not proof of the intended release.
 2. In the current authenticated Base dashboard, inspect the steps after the public app-name form: existing web-app URL, metadata, ownership proof, listing/discovery rules, and any wallet requirements. Record screen/UI evidence before registering; avoid copying legacy instructions from search results.
 3. Prepare accurate share artwork and any dashboard-required metadata on a distinct preview origin. Test the URL in Base App on a physical mobile device, including address-only browsing and wallet connect behavior. Keep wallet signing disabled.
 4. Complete security gates and product utility validation before publishing a transaction feature. Registration or discovery must never be described as an audit, endorsement, distribution promise or airdrop eligibility signal.

@@ -18,8 +18,10 @@ export function validatePublicOrigin(value:string){
 }
 
 type OverviewReader = (input: WalletOverviewInput, signal: AbortSignal) => Promise<unknown>;
-export function createOverviewWebServer(options: { read?: OverviewReader; deadlineMs?: number; publicOrigin?: string } = {}) {
+export function createOverviewWebServer(options: { read?: OverviewReader; deadlineMs?: number; publicOrigin?: string; releaseCommit?: string } = {}) {
   const publicOrigin=options.publicOrigin?validatePublicOrigin(options.publicOrigin):undefined;
+  const commit=options.releaseCommit??process.env.RENDER_GIT_COMMIT??'';
+  const releaseCommit=/^[0-9a-f]{40}$/i.test(commit)?commit.toLowerCase():null;
   const admission=new RequestAdmission();
   const read: OverviewReader = options.read ?? ((input, signal) => {
     // Public defaults only: never inherit a local wallet, gauges or history.
@@ -50,7 +52,7 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
       error(res, 403, "LOCAL_ONLY", "Open the app using its configured address."); return;
     }
     const url = new URL(req.url ?? "/", publicOrigin??`http://${host}`);
-    if((req.method==='GET'||req.method==='HEAD')&&url.pathname==='/healthz'){json(res,200,{status:'ok',sendingEnabled:false});return;}
+    if((req.method==='GET'||req.method==='HEAD')&&url.pathname==='/healthz'){json(res,200,{status:'ok',sendingEnabled:false,releaseCommit});return;}
     if(publicOrigin&&url.pathname==='/'){res.writeHead(302,{Location:'/basket'});res.end();return;}
     if (req.method === 'POST' && ['/api/basket/inventory','/api/basket/quote','/api/basket/plan','/api/basket/simulate','/api/basket/compare'].includes(url.pathname)) {
       if(req.headers['content-type']?.split(';')[0].trim()!=='application/json') {error(res,415,'JSON_REQUIRED','Send JSON.');return;}
