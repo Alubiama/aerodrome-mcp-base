@@ -7,7 +7,7 @@ import { getWalletOverview } from "./mcp/overview.js";
 
 let reads = 0;
 let mode = "normal";
-const server = createOverviewWebServer({ deadlineMs: 500, read: async (input, signal) => {
+const server = createOverviewWebServer({ deadlineMs: 500, releaseCommit:'a'.repeat(40), read: async (input, signal) => {
   reads++;
   if (mode === "wait") return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("stopped")), { once: true }));
   if (mode === "fail") throw new Error("PRIVATE_INTERNAL_DETAIL");
@@ -22,6 +22,10 @@ const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 const wallet = overviewFixture().wallet;
 const post = (body: unknown, headers: Record<string, string> = {}) => fetch(`${origin}/api/overview`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 try {
+  const health=await fetch(`${origin}/healthz`);
+  assert.equal(health.status,200);
+  assert.deepEqual(await health.json(),{status:'ok',sendingEnabled:false,releaseCommit:'a'.repeat(40)});
+  assert.equal(health.headers.get('cache-control'),'no-store');
   const demo = await fetch(`${origin}/api/demo`);
   assert.equal(demo.status, 200);
   const sample = await demo.json();
