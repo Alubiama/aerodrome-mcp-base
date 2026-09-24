@@ -47,6 +47,7 @@ try {
   assert.equal((await fetch(`${origin}/basket`,{method:"HEAD"})).status,200);
   assert.equal((await fetch(`${origin}/wallet.js`)).status,200);
   assert.equal((await fetch(`${origin}/plan-guard.js`)).status,200);
+  assert.equal((await fetch(`${origin}/comparison-choice.js`)).status,200);
   assert.equal((await fetch(`${origin}/base-account-sdk.js`)).status,404);
   for (const route of ['inventory','quote','plan','simulate','compare']) {
     assert.equal((await fetch(`${origin}/api/basket/${route}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({wallet:'invalid'})})).status,400);
