@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 // Browser-only adapter is tested against deterministic EIP-1193 providers.
 // @ts-ignore JavaScript module intentionally has no build dependency.
-import {WalletSession,rawAmount,atomicStatus} from '../web/wallet.js';
+import {WalletSession,discoverWallets,rawAmount,atomicStatus} from '../web/wallet.js';
 const account='0x0000000000000000000000000000000000000001';
 const requests:string[]=[],listeners=new Map<string,()=>void>();let network='0x2105',accounts=[account],capability='supported';
 const provider={on:(e:string,f:()=>void)=>listeners.set(e,f),removeListener:(e:string)=>listeners.delete(e),request:async({method}:any)=>{requests.push(method);if(method==='eth_chainId')return network;if(method==='wallet_getCapabilities')return {'0x2105':{atomic:{status:capability}}};return accounts}};
@@ -30,3 +30,28 @@ await session.connect(provider);listeners.get('disconnect')!();assert.equal(sess
 await session.connect({...provider,request:async()=>{throw Object.assign(Error('denied'),{code:4001})}});
 assert.equal(session.state.status,'error');assert.equal(session.state.message,'Connection declined.');session.detach();
 console.log('PASS wallet adversarial checks: final-read network race, disconnect invalidation and user refusal.');
+
+// A named EIP-6963 wallet is offered without connecting or signing. Unsupported
+// optional capabilities must not prevent its Base account from connecting.
+const browser=new EventTarget() as EventTarget&{ethereum?:unknown};
+const discovered:{name:string;provider:any}[]=[];const rabbyRequests:string[]=[];
+const rabby={request:async({method}:any)=>{
+ rabbyRequests.push(method);
+ if(method==='eth_requestAccounts'||method==='eth_accounts')return [account];
+ if(method==='eth_chainId')return '0x2105';
+ if(method==='wallet_getCapabilities')throw Error('Unsupported method');
+ throw Error('Unexpected wallet method');
+}};
+browser.addEventListener('eip6963:requestProvider',()=>{
+ const event=new Event('eip6963:announceProvider');
+ Object.defineProperty(event,'detail',{value:{provider:rabby,info:{name:'Rabby Wallet'}}});
+ browser.dispatchEvent(event);
+});
+const stopDiscovery=discoverWallets(browser,(entry:{name:string;provider:any})=>discovered.push(entry));
+assert.deepEqual(discovered.map(entry=>entry.name),['Rabby Wallet']);
+assert.deepEqual(rabbyRequests,[],'wallet discovery does not request an account');
+await session.connect(discovered[0].provider);
+assert.equal(session.state.status,'connected');assert.equal(session.state.atomic,'unknown');
+assert.deepEqual(rabbyRequests,['eth_requestAccounts','eth_chainId','wallet_getCapabilities','eth_accounts','eth_chainId']);
+session.detach();stopDiscovery();
+console.log('PASS named EIP-6963 Rabby adapter: optional capability failure, no discovery prompt or signing. Physical extension UI remains unverified.');
