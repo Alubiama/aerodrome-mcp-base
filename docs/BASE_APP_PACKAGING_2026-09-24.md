@@ -1,6 +1,6 @@
 # Base App packaging evidence — 2026-09-24
 
-Status: **web preview preparation only**. Collect is not registered or verified as a Base App. This file is a current-source checkpoint, not a publication claim.
+Status: **read-only web preview released; Base App registration unverified**. Collect is not registered or verified as a Base App. This file is a current-source checkpoint, not a publication claim.
 
 ## Current evidence
 
@@ -11,6 +11,7 @@ Status: **web preview preparation only**. Collect is not registered or verified 
 - The [Base Dashboard home](https://dashboard.base.org/) states that login is required to register an app. The current browser session is unauthenticated; clicking **Log In** did not expose a completed account session or later registration steps. No account, wallet signature, or app registration was created.
 - Collect must work for Rabby-only users without requiring Coinbase Wallet. The dashboard's supported login methods have not been verified, so registration must not be described as requiring a Coinbase wallet. Collect's address-first web flow and named Rabby browser-provider path remain separate from dashboard registration.
 - The [Base home page](https://www.base.org/) describes the newer Base Dashboard as a place to register apps. This supports using the live dashboard as the next source of truth, but does not establish the full flow or required metadata. The older [Mini App guide URL](https://docs.base.org/base-app/miniapps/mini-apps) currently redirects to a general overview, so its cached search snippet is not a current instruction.
+- The read-only Collect web preview was manually deployed to `https://collect-base.onrender.com/basket` from `collect-render-preview` commit `561a85d87356fbdd79689d41067feee02a3882d8`. The public `/healthz` returned that exact `releaseCommit` with `sendingEnabled:false`; Render showed the deploy Live and Auto-Deploy Off. An unauthenticated browser displayed the address-first page, and a 390 px viewport showed no page-level horizontal overflow. This establishes the web release identity and limited browser behavior, not Base App registration or wallet safety.
 
 ## Safe preparation completed
 
@@ -20,7 +21,7 @@ Status: **web preview preparation only**. Collect is not registered or verified 
 
 ## Next verification gates
 
-1. Manually release the merged read-only build to its public HTTPS origin. Compare `/healthz` `releaseCommit` with the chosen Git SHA and confirm `sendingEnabled:false`, then verify the actual public HTML, API, and mobile behavior unauthenticated. The commit field uses Render's documented runtime `RENDER_GIT_COMMIT`; a missing or mismatched field is not proof of the intended release.
-2. In the current authenticated Base dashboard, inspect the steps after the public app-name form: existing web-app URL, metadata, ownership proof, listing/discovery rules, and any wallet requirements. Record screen/UI evidence before registering; avoid copying legacy instructions from search results.
-3. Prepare accurate share artwork and any dashboard-required metadata on a distinct preview origin. Test the URL in Base App on a physical mobile device, including address-only browsing and wallet connect behavior. Keep wallet signing disabled.
-4. Complete security gates and product utility validation before publishing a transaction feature. Registration or discovery must never be described as an audit, endorsement, distribution promise or airdrop eligibility signal.
+1. In an authenticated Base dashboard, inspect the steps after the public app-name form: existing web-app URL, metadata, ownership proof, listing/discovery rules, and any wallet requirements. The current in-app browser session reached only the unauthenticated login screen; a click stayed on “Connecting…”. Record screen/UI evidence before registering; avoid copying legacy instructions from search results.
+2. Prepare accurate share artwork and any dashboard-required metadata on a distinct preview origin. Test the released URL in Base App on a physical mobile device, including address-only browsing and Rabby wallet behavior. Keep wallet signing disabled.
+3. Validate after-fee utility for a representative basket with an explicitly authorized public wallet address. A public non-user test address loaded inventory and one-token indicative quotes, but a two-token route probe returned `BASKET_UNAVAILABLE`; neither result proves real-wallet execution.
+4. Complete independent security review and product utility validation before publishing a transaction feature. Registration or discovery must never be described as an audit, endorsement, distribution promise or airdrop eligibility signal.
