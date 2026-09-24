@@ -12,6 +12,12 @@ verified candidates have not expired. Failed and unknown candidates remain
 visible. A partial or incomparable response cannot establish the best basket.
 Other subsets, stable pools, Slipstream and aggregators are not covered.
 
+If every sampled candidate is verified and an omitted-token option has a
+positive after-fee estimate above the full set, the interface offers to use
+that subset for a **new preview**. Applying it only changes local token
+selection; it does not reuse an old plan, request a signature, or send funds.
+The option disappears when the comparison expires or its inputs change.
+
 In a read-only same-block probe at Base block 51707310, a test basket of 1 JESS
 and 0.00001 WETH estimated 0.020125 USDC after network costs, while WETH alone
 estimated 0.023260 USDC. This demonstrates why a positive token quote does not

@@ -112,7 +112,7 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
     }
     const files: Record<string, [string, string]> = {
       "/": ["index.html", "text/html"], "/app.js": ["app.js", "text/javascript"], "/styles.css": ["styles.css", "text/css"],
-      '/basket':['basket.html','text/html'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/plan-guard.js':['plan-guard.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css']
+      '/basket':['basket.html','text/html'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/plan-guard.js':['plan-guard.js','text/javascript'],'/comparison-choice.js':['comparison-choice.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css']
     };
     if ((req.method === "GET" || req.method === "HEAD") && Object.hasOwn(files, url.pathname)) {
       const [filename, mime] = files[url.pathname];
