@@ -16,6 +16,20 @@ export function leaveOneOutCandidates(tokens:string[]){
  return [tokens,...tokens.map((_,i)=>tokens.filter((__,j)=>j!==i))];
 }
 
+export async function mapBounded<T,R>(items:T[],limit:number,signal:AbortSignal,run:(item:T)=>Promise<R>):Promise<R[]>{
+ if(!Number.isInteger(limit)||limit<1)throw Error('Invalid concurrency limit');
+ const results=new Array<R>(items.length);let next=0;
+ await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{
+  while(next<items.length){
+   signal.throwIfAborted();
+   const index=next++;
+   results[index]=await run(items[index]);
+  }
+ }));
+ signal.throwIfAborted();
+ return results;
+}
+
 export function summarizeBasketComparison(rows:CandidateResult[],now=Date.now()){
  const estimated=rows.filter(r=>r.status==='ESTIMATED'&&r.netUsdc!==null);
  const baselines=new Set(estimated.map(r=>`${r.gasPriceWei}:${r.priceUsdcPerEth}`));
@@ -41,8 +55,7 @@ export async function compareBasketCandidates(raw:unknown,signal:AbortSignal){
   return Reflect.get(target,key);
  }});
  const runtime:BasketRuntime={client:pinned,fetch,allowQuotes:false};
- const rows:CandidateResult[]=[];
- for(const tokens of candidates){
+ const rows=await mapBounded(candidates,2,signal,async(tokens):Promise<CandidateResult>=>{
   signal.throwIfAborted();
   const excluded=input.tokens.filter(t=>!tokens.some(x=>x.toLowerCase()===t.toLowerCase()));
   try{
@@ -52,12 +65,12 @@ export async function compareBasketCandidates(raw:unknown,signal:AbortSignal){
    const sim=await simulateBasketPlan(plan,signal);
    if(sim.blockTag.toLowerCase()!==block.hash.toLowerCase())throw Error('Simulation anchor drift');
    const value=await estimateBasketValue(plan,sim,signal,feeClient,pricing);
-   rows.push({tokens,excluded,status:value.status,grossUsdc:sim.receivedUsdc,networkFeeUsdc:value.estimatedNetworkFeeUsdc,netUsdc:value.estimatedNetUsdc,gasPriceWei:value.gasPriceWei,priceUsdcPerEth:value.priceUsdcPerEth,expiresAt:plan.expiresAt,reason:value.reason});
+   return {tokens,excluded,status:value.status,grossUsdc:sim.receivedUsdc,networkFeeUsdc:value.estimatedNetworkFeeUsdc,netUsdc:value.estimatedNetUsdc,gasPriceWei:value.gasPriceWei,priceUsdcPerEth:value.priceUsdcPerEth,expiresAt:plan.expiresAt,reason:value.reason};
   }catch(error){
    if(signal.aborted)throw error;
-   rows.push({tokens,excluded,status:'UNVERIFIED',grossUsdc:null,networkFeeUsdc:null,netUsdc:null,gasPriceWei:null,priceUsdcPerEth:null,expiresAt:null,reason:'Candidate quote or simulation could not be verified.'});
+   return {tokens,excluded,status:'UNVERIFIED',grossUsdc:null,networkFeeUsdc:null,netUsdc:null,gasPriceWei:null,priceUsdcPerEth:null,expiresAt:null,reason:'Candidate quote or simulation could not be verified.'};
   }
- }
+ });
  const summary=summarizeBasketComparison(rows);
  return {wallet:input.wallet,chainId:8453,destination:'USDC',provider:'AERODROME',anchorBlockNumber:block.number.toString(),anchorBlockHash:block.hash,checkedAt:new Date().toISOString(),candidates:rows,...summary,executable:false};
 }
