@@ -32,7 +32,8 @@ for(const partial of [false,true]){
  } finally {await client.close();}
 }
 const sorted=[...timings].sort((a,b)=>a-b);
+const release=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
 fs.writeFileSync(path.join(root,'integration-demo/data.json'),JSON.stringify({source:'SYNTHETIC_STDIO_FIXTURE',schemaVersion:1,generatedAt:new Date().toISOString(),rows},null,2));
-fs.writeFileSync(path.join(root,'integration-demo/contracts.json'),JSON.stringify({release:'0.5.1',transport:'stdio',tools},null,2));
+fs.writeFileSync(path.join(root,'integration-demo/contracts.json'),JSON.stringify({release,transport:'stdio',tools},null,2));
 fs.writeFileSync(path.join(root,'integration-demo/benchmark.json'),JSON.stringify({mode:'SYNTHETIC_STDIO',samples:timings.length,node:process.version,platform:process.platform,medianMs:Math.round(sorted[Math.floor(sorted.length/2)]),maxMs:Math.round(sorted.at(-1)!),scope:'Tool latency after connection; includes validation and serialization. No RPC. Not a production SLA.',arithmeticOracle:'22 inputs x 4 stress states x 2 pools = 176 checks of denominators and rewards passed'},null,2));
 console.log('Generated 22 real stdio fixture results; 176 independent arithmetic checks passed.');

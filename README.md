@@ -10,7 +10,7 @@ Independent community project. Not affiliated with Aerodrome or Base. This relea
 
 Version: **0.5.2**. License: MIT.
 
-[Integration guide](INTEGRATION.md) · [Demo source and setup](INTEGRATION.md) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
+[One-minute demo](docs/ONE_MINUTE_DEMO.md) · [Integration guide](INTEGRATION.md) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
 
 ## Quick start
 

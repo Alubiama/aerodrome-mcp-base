@@ -1,5 +1,5 @@
 {
-  "release": "0.5.1",
+  "release": "0.5.2",
   "transport": "stdio",
   "tools": [
     {

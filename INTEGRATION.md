@@ -27,7 +27,7 @@ Live mode uses configured public RPC transport and may be slow or unavailable. I
 
 ## Contract and rendering
 
-- Release: v0.5.1. Card format: `schemaVersion: 1`. Comparison fields follow the versioned release and the live MCP `tools/list` schema. Do not infer compatibility from a tool name alone; pin a release and validate output.
+- Release: v0.5.2. Card format: `schemaVersion: 1`. Comparison fields follow the versioned release and the live MCP `tools/list` schema. Do not infer compatibility from a tool name alone; pin a commit and validate output.
 - `integration-demo/contracts.json` is the generated schema snapshot for this release. Run discovery against the actual server when connecting.
 - `scenarios` are the simultaneous allocations. Nested `evidence` includes the older independent full-allocation estimates; do not render those as simultaneous results.
 - Preserve `status`, `complete`, warnings, block number/hash and observation timestamp. A fresh retrieval time does not prove all relevant chain history was read.
