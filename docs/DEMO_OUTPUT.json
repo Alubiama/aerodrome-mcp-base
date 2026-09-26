@@ -1,0 +1,77 @@
+{
+  "notice": "Synthetic fixture captured from npm run --silent demo; no live wallet or RPC. Not income or a payout forecast.",
+  "outputs": [
+    {
+      "source": "SYNTHETIC - address-only overview, no RPC",
+      "summary": [
+        "Overview at block 123. Liquid funds, locks, voting power and rewards are reported separately.",
+        "ETH: 1.25.",
+        "DEMO (0x0000000000000000000000000000000000000003): 3.",
+        "USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913): 12.5.",
+        "veNFTs discovered: 1 of 1.",
+        "veNFT #1: 40 of token 0x0000000000000000000000000000000000000003; unlock time 1970-01-01T00:33:20.000Z.",
+        "Normal voting window: open. This is not a complete check of a position's voting eligibility.",
+        "veNFT #1: voting power 20; no vote recorded in the current epoch.",
+        "Reward DEMO (0x0000000000000000000000000000000000000003): 2.5; source 0x0000000000000000000000000000000000000004.",
+        "Rewards cover current votes and selected gauges only. Historical rewards, LP position value and total wallet value are not calculated."
+      ]
+    },
+    {
+      "source": "SYNTHETIC \u2014 no real wallet or RPC",
+      "status": "BASELINE_CREATED",
+      "changes": [],
+      "findings": [
+        {
+          "code": "BASELINE_CREATED",
+          "level": "INFO",
+          "section": "protocol",
+          "key": null,
+          "message": "The first comparison baseline was created. Changes cannot be determined yet.",
+          "fromBlock": null,
+          "toBlock": "100",
+          "token": null,
+          "decimals": null,
+          "deltaFormatted": null,
+          "sources": [
+            "https://basescan.org/block/100"
+          ]
+        }
+      ],
+      "baselineSaved": true
+    },
+    {
+      "source": "SYNTHETIC \u2014 no real wallet or RPC",
+      "status": "COMPARED",
+      "changes": [
+        {
+          "section": "rewards",
+          "key": "gauge:0x0000000000000000000000000000000000000004/token:0x0000000000000000000000000000000000000006/amountRaw",
+          "kind": "CHANGED",
+          "before": "100",
+          "after": "125",
+          "deltaRaw": "25"
+        }
+      ],
+      "findings": [
+        {
+          "code": "REWARD_CHANGED",
+          "level": "INFO",
+          "section": "rewards",
+          "key": "gauge:0x0000000000000000000000000000000000000004/token:0x0000000000000000000000000000000000000006/amountRaw",
+          "message": "reward for token 0x0000000000000000000000000000000000000006: 100 \u2192 125. This is a change in the observed amount; its cause and realized income are not established.",
+          "fromBlock": "100",
+          "toBlock": "101",
+          "token": "0x0000000000000000000000000000000000000006",
+          "decimals": 0,
+          "deltaFormatted": "25",
+          "sources": [
+            "https://basescan.org/block/101",
+            "https://basescan.org/block/100",
+            "https://basescan.org/token/0x0000000000000000000000000000000000000006"
+          ]
+        }
+      ],
+      "baselineSaved": true
+    }
+  ]
+}

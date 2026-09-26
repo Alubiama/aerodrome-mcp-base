@@ -2,7 +2,7 @@
 
 # Aerodrome MCP for Base
 
-**Compare voting allocations, inspect rewards, and keep a private decision record.**
+**See what changed in an Aerodrome position — with the block references and missing data kept visible.**
 
 A local MCP server for Aerodrome on Base mainnet (chain ID 8453). Compare your current veNFT voting positions and bounded claimable rewards against a saved snapshot, or compare selected pools' voting evidence.
 
@@ -10,7 +10,19 @@ Independent community project. Not affiliated with Aerodrome or Base. This relea
 
 Version: **0.5.2**. License: MIT.
 
-[One-minute demo](docs/ONE_MINUTE_DEMO.md) · [Integration guide](INTEGRATION.md) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
+[Try it and check the result](docs/TRY_IT.md) · [One-minute demo](docs/ONE_MINUTE_DEMO.md) · [Integration guide](INTEGRATION.md) · [Security boundaries](SECURITY.md) · [Brand notes](BRAND.md)
+
+## A small job you can try today
+
+You maintain an Aerodrome dashboard or an assistant for veAERO holders. A reward amount changed between two checks. Your interface needs to show **what changed, which blocks were compared, and what remains unknown**.
+
+This MCP returns that evidence as structured data. The example below changes one synthetic reward from **100 → 125 raw units**, with `deltaRaw: "25"` and block references **100 → 101**. It does not label the change as earned income or a claimed reward.
+
+![Synthetic reward change: 100 to 125 raw units; blocks 100 to 101; cause unknown](docs/assets/reward-change.svg)
+
+**First step:** [run the offline example and compare its output](docs/TRY_IT.md). No wallet connection or API key is needed for this example once dependencies are installed. Live reads require an RPC connection and cover only the documented scope.
+
+**For builders:** start with the existing [stdio client](examples/stdio-client.ts) and [integration guide](INTEGRATION.md). For holders: supply a public address to the overview through your MCP client; the offline demo is a fixture, not your account.
 
 ## Quick start
 
