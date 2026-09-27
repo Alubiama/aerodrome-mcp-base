@@ -54,6 +54,25 @@ async function balances(wallet:Address, addresses:Address[], blockNumber:bigint,
 async function anchor(rt:BasketRuntime) {if(await rt.client.getChainId()!==8453)throw Error('Wrong chain');return rt.client.getBlock();}
 async function checkBlock(rt:BasketRuntime, block:{number:bigint;hash:string}) {if((await rt.client.getBlock({blockNumber:block.number})).hash!==block.hash)throw Error('Block changed');}
 export class InventoryChangedError extends Error {}
+type DiscoveryFailure={code:'RATE_LIMITED'|'TIMEOUT'|'UPSTREAM'|'INVALID_RESPONSE'|'NETWORK';retryable:boolean};
+class DiscoveryHttpError extends Error {constructor(readonly status:number){super('Discovery provider unavailable');}}
+async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRuntime) {
+ const discoverySignal=AbortSignal.any([signal,AbortSignal.timeout(5000)]);
+ for(let attempt=0;attempt<2;attempt++)try {
+  const response=await rt.fetch(`https://base.blockscout.com/api/v2/addresses/${wallet}/token-balances`,{signal:discoverySignal,redirect:'error'});
+  if(!response.ok){await response.body?.cancel();throw new DiscoveryHttpError(response.status);}
+  const data=await boundedJson(response);
+  if(!Array.isArray(data))throw Error('Invalid inventory');
+  return {data,failure:null};
+ }catch(e){
+  signal.throwIfAborted();
+  const failure:DiscoveryFailure=discoverySignal.aborted?{code:'TIMEOUT',retryable:true}:e instanceof DiscoveryHttpError?{code:e.status===429?'RATE_LIMITED':'UPSTREAM',retryable:e.status===429||e.status>=500}:e instanceof TypeError?{code:'NETWORK',retryable:true}:{code:'INVALID_RESPONSE',retryable:false};
+  // A single retry shares the same five-second budget. Do not hammer 429s or retry invalid data.
+  if(attempt===0&&!discoverySignal.aborted&&(failure.code==='NETWORK'||e instanceof DiscoveryHttpError&&e.status>=500))continue;
+  return {data:[],failure};
+ }
+ throw Error('Discovery attempts exhausted');
+}
 export const INVENTORY_PAGE_SIZE=16;
 type Candidate={token:Address;price:number|null;suspectedSpam:boolean;spamReason:string|null};
 export function suspiciousMetadata(value:unknown) {
@@ -77,10 +96,11 @@ export function inventoryCandidates(data:unknown,manual:Address[]=[]) {
 export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=runtime(signal)) {
  const input=inventoryInput.parse(raw);const warnings=['All valid nonzero ERC-20 entries returned by the indexer are candidates, including entries without prices. This is source coverage, not proof of every asset on Base.','Balances are verified in pages of 16. Pages may have different block times; selected balances are refreshed before quoting.','Estimated values use an unverified indexer price and an on-chain balance; they are not sale quotes. Suspicious metadata flags are only heuristics.'];
  let data:unknown=[];let discoveryStatus:'INDEXER_CANDIDATES'|'MANUAL'|'UNAVAILABLE'=input.tokens?.length?'MANUAL':'INDEXER_CANDIDATES';
- if(!input.tokens?.length)try {
-  data=await boundedJson(await rt.fetch(`https://base.blockscout.com/api/v2/addresses/${input.wallet}/token-balances`,{signal,redirect:'error'}));
-  if(!Array.isArray(data))throw Error('Invalid inventory');
- } catch {signal.throwIfAborted();data=[];discoveryStatus='UNAVAILABLE';warnings.push('Discovery is unavailable. Only core tokens are shown; reload or add token addresses.');}
+ let discoveryFailure:DiscoveryFailure|null=null;
+ if(!input.tokens?.length){
+  const discovery=await discoverInventory(input.wallet,signal,rt);data=discovery.data;discoveryFailure=discovery.failure;
+  if(discoveryFailure){discoveryStatus='UNAVAILABLE';warnings.push('Discovery is unavailable. Only core tokens are shown; retry discovery or add token addresses.');}
+ }
  const candidates=inventoryCandidates(data,input.tokens??[]);
  const inventoryId=createHash('sha256').update(JSON.stringify({wallet:input.wallet.toLowerCase(),mode:discoveryStatus,tokens:candidates.map(x=>x.token.toLowerCase())})).digest('hex');
  if(input.offset>0&&(input.inventoryId!==inventoryId||input.offset>=candidates.length))throw new InventoryChangedError('Inventory changed; reload from the first page');
@@ -88,7 +108,7 @@ export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=ru
  const block=await anchor(rt);const observed=await balances(input.wallet,page.map(x=>x.token),block.number,signal,rt);await checkBlock(rt,block);
  const rows=observed.map((row,i)=>{const candidate=page[i];const estimate=row.amountFormatted!==null&&candidate.price!==null?Number(row.amountFormatted)*candidate.price:NaN;const suspicious=candidate.suspectedSpam||suspiciousMetadata(row.symbol);return {...row,approximateUsd:Number.isFinite(estimate)&&estimate>=0?estimate:null,suspectedSpam:suspicious,spamReason:suspicious?candidate.spamReason??'Token symbol contains promotional instructions; review separately.':null,blockNumber:block.number.toString()};});
  const next=input.offset+page.length;
- return {wallet:input.wallet,blockNumber:block.number.toString(),observedAt:new Date().toISOString(),rows,warnings,discoveryStatus,pagination:{offset:input.offset,nextOffset:next<candidates.length?next:null,totalCandidates:candidates.length,inventoryId}};
+ return {wallet:input.wallet,blockNumber:block.number.toString(),observedAt:new Date().toISOString(),rows,warnings,discoveryStatus,discoveryFailure,pagination:{offset:input.offset,nextOffset:next<candidates.length?next:null,totalCandidates:candidates.length,inventoryId}};
 }
 const uint256=z.string().regex(/^\d+$/).max(78).refine(x=>BigInt(x)<=MAX_UINT256);
 const summarySchema=z.object({tokenIn:address,tokenOut:address,amountIn:uint256,amountOut:uint256});
