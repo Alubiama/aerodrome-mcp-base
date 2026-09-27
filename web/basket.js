@@ -48,7 +48,11 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   const scope=filter==='all'?'All loaded tokens':filter==='u1'?'Under $1':'Under $5';
   const note=el('p',`${scope}: ${normal.length} shown of ${inventory.rows.length} loaded. ${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}${p.nextOffset!==null?'Load more to check the remaining candidates.':''}`,'meta');note.setAttribute('role','status');result.append(note);
   if(!normal.length)result.append(el('p','No loaded tokens match this filter. Try All or load more.','meta'));
-  if(inventory.discoveryStatus==='UNAVAILABLE')result.append(el('p','Discovery unavailable. Only core tokens are shown. Reload to try again.','bad'));
+  if(inventory.discoveryStatus==='UNAVAILABLE'){
+   const reasons={RATE_LIMITED:'The token indexer is rate limited. Wait a minute before retrying.',TIMEOUT:'The token indexer did not respond in time.',UPSTREAM:'The token indexer returned an error.',INVALID_RESPONSE:'The token indexer response could not be verified.',NETWORK:'The token indexer could not be reached.'};
+   result.append(el('p',`${reasons[inventory.discoveryFailure?.code]||'Token discovery is unavailable.'} Only USDC and WETH were checked. Other balances are not known to be zero.`,'bad'));
+   const retry=el('button',busy?'Checking…':'Retry discovery','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry,el('p','Retry keeps your selection where refreshed balances still allow it. You can also enter token contract addresses in Choose tokens manually.','meta'));
+  }
   const list=el('div','','tokens');normal.forEach(x=>list.append(tokenRow(x)));result.append(list);
   if(review.length){const d=el('details','','review');d.append(el('summary',`Needs review (${review.length})`),el('p','Flagged by metadata only. These tokens cannot be selected here.','meta'));review.forEach(x=>d.append(tokenRow(x)));result.append(d)}
   result.append(el('p','Quotes via Aerodrome · classic pools only','meta'));const controls=el('div','','controls'),out=el('select');out.setAttribute('aria-label','Output asset');for(const name of ['USDC','ETH']){const o=el('option',name);o.value=name;out.append(o)}out.value=destination;out.onchange=()=>{invalidate();destination=out.value;render()};
@@ -67,20 +71,25 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   const compare=el('button',busy?'Comparing…':'Compare what to include','prepare');compare.disabled=busy||!canCheck;compare.onclick=compareSelection;
   const advanced=el('details','','advanced-actions');advanced.append(el('summary','Advanced route checks'),prepare,simulate);
   panel.append(compare,advanced,el('p','Comparison tests the full set and each one-token omission.','meta'));
+  if(!canCheck)panel.append(el('p','Compare and advanced checks require 2–5 input tokens with USDC as the output asset. Preview works for a single token too.','meta'));
   if(destination==='USDC'&&selected.has(USDC))panel.append(el('p','USDC is already the output asset. Deselect it to compare or simulate.','meta'));
   result.append(inventoryMain,panel);
  }
- async function load(more=false){
+ async function load(more=false,retry=false){
   const ts=manualTokens(),w=wallet.value.trim();if(!address(w)||ts.length>16||ts.some(x=>!address(x))||new Set(ts.map(x=>x.toLowerCase())).size!==ts.length){error.textContent='Enter a valid wallet and up to 16 unique token addresses.';return}
+  if(more&&(!inventory||inventory.pagination.nextOffset===null)){error.textContent='Load a wallet before requesting another page.';return}
+  const preserve=retry&&inventory&&same(inventory.wallet,w)&&!ts.length;
   invalidate();const n=sequence;controller=new AbortController();busy=true;error.textContent='';
-  if(!more){inventory=null;selected.clear();readKept();result.textContent='Loading balances…'}else render();
+  if(!more&&!preserve){inventory=null;selected.clear();amounts.clear();readKept();result.textContent='Loading balances…'}else render();
   const offset=more?inventory.pagination.nextOffset:0,oldId=more?inventory.pagination.inventoryId:null;
   try{
    const body={wallet:w,offset};if(ts.length)body.tokens=ts;if(oldId)body.inventoryId=oldId;
    const response=await fetch('/api/basket/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal}),data=await response.json();if(n!==sequence)return;
    if(!response.ok)throw Error(data.error?.message||'Inventory unavailable. Reload to try again.');const p=data.pagination;
    if(!same(data.wallet,w)||!Array.isArray(data.rows)||data.rows.length>16||!p||p.offset!==offset||!Number.isInteger(p.totalCandidates)||!(/^[a-f0-9]{64}$/).test(p.inventoryId)||more&&oldId!==p.inventoryId||p.nextOffset!==null&&p.nextOffset!==offset+data.rows.length||data.rows.some(x=>!address(x.token))||new Set(data.rows.map(x=>x.token.toLowerCase())).size!==data.rows.length)throw Error('Inventory mismatch. Reload from the first page.');
-   const rows=new Map((more?inventory.rows:[]).map(x=>[x.token.toLowerCase(),x]));data.rows.forEach(x=>rows.set(x.token.toLowerCase(),x));inventory={...data,rows:[...rows.values()]};busy=false;render();
+   const rows=new Map((more?inventory.rows:[]).map(x=>[x.token.toLowerCase(),x]));data.rows.forEach(x=>rows.set(x.token.toLowerCase(),x));inventory={...data,rows:[...rows.values()]};
+   if(preserve){for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));if(!row||!eligible(row)){selected.delete(token);amounts.delete(token);continue}try{if(BigInt(rawAmount(amounts.get(token)||'',row.decimals))>BigInt(row.amountRaw))amounts.set(token,'')}catch{amounts.set(token,'')}}}
+   busy=false;render();
   }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;if(inventory)render();else result.textContent='No inventory loaded.'}
  }
  function selectedAmounts(){const out={};for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));const raw=rawAmount(amounts.get(token)||'',row.decimals);if(BigInt(raw)>BigInt(row.amountRaw))throw Error(`Amount exceeds ${row.symbol||'token'} balance.`);out[token]=raw}return out}
@@ -89,7 +98,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   invalidate();const n=sequence,w=inventory.wallet,tokens=[...selected],output=destination;controller=new AbortController();busy=true;error.textContent='';render();
   try{
    const response=await fetch('/api/basket/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits,destination:output,provider:'AERODROME'}),signal:controller.signal}),data=await response.json();if(n!==sequence)return;const b=data.binding,expires=Date.parse(b?.expiresAt);
-   if(!response.ok||!same(data.wallet,w)||data.destination!==output||data.provider!=='AERODROME'||!Array.isArray(data.rows)||data.rows.length!==tokens.length||new Set(data.rows.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.rows.every(x=>tokens.some(t=>same(t,x.token)))||!b||!(/^[a-f0-9]{64}$/).test(b.basketKey)||b.executable!==false||b.expired||!Number.isFinite(expires)||expires<=Date.now())throw Error('Quote unavailable. Request a fresh preview.');
+   if(!response.ok||!same(data.wallet,w)||data.destination!==output||data.provider!=='AERODROME'||!Array.isArray(data.rows)||data.rows.length!==tokens.length||new Set(data.rows.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.rows.every(x=>tokens.some(t=>same(t,x.token))&&(x.amountRaw===limits[x.token.toLowerCase()]||['READ_FAILED','ZERO_BALANCE'].includes(x.status)))||!b||!(/^[a-f0-9]{64}$/).test(b.basketKey)||b.executable!==false||b.expired||!Number.isFinite(expires)||expires<=Date.now())throw Error('Quote unavailable. Request a fresh preview.');
    busy=false;render();const box=el('section','','quote'),paused=data.rows.some(x=>x.status==='PROVIDER_APPROVAL_REQUIRED');box.append(el('b',paused?'Route preview paused':data.totalOutputFormatted===null?'Quote unavailable':`${short(data.totalOutputFormatted)} ${output}`),el('p',paused?'Permission to share selected tokens and amounts with KyberSwap is pending. No route request was sent.':'Aerodrome classic pools · before gas. Limited route coverage; execution not simulated.','meta'));
    const routes=el('div','','quote-rows');
    for(const row of data.rows){const route=el('div','','quote-row');const status=row.status==='INDICATIVE_QUOTE'?`${short(row.outputFormatted)} ${output}`:row.status==='ALREADY_DESTINATION'?'Already in output asset':row.status==='QUOTE_UNAVAILABLE'?'Route unavailable':row.status==='NO_POSITIVE_QUOTE'?'No positive output':row.status==='ZERO_BALANCE'?'No balance':row.status==='PROVIDER_APPROVAL_REQUIRED'?'Permission required':'Could not verify';route.append(el('b',row.symbol||row.token),el('span',status));const detail=el('details');detail.append(el('summary','Route details'),el('p',row.token,'meta'),el('p',row.reason,'meta'));route.append(detail);routes.append(route)}box.append(routes);
