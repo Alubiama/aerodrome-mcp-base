@@ -8,12 +8,12 @@ import { createHash } from 'node:crypto';
 
 const address = z.string().refine(x => isAddress(x) && !/^0x0{40}$/i.test(x)).transform(x => getAddress(x));
 const tokens = z.array(address).max(16).refine(xs => new Set(xs.map(x => x.toLowerCase())).size === xs.length);
-export const inventoryInput = z.strictObject({ wallet: address, tokens: tokens.optional(), offset:z.number().int().min(0).max(50000).default(0), inventoryId:z.string().regex(/^[a-f0-9]{64}$/).optional() }).refine(x=>x.offset===0||!!x.inventoryId,{message:'A continuation requires its inventory ID'});
+export const inventoryInput = z.strictObject({ wallet: address, tokens: tokens.optional(), offset:z.number().int().min(0).max(50000).default(0), inventoryId:z.string().regex(/^[a-f0-9]{64}$/).optional(), refreshDiscovery:z.boolean().default(false) }).refine(x=>x.offset===0||!!x.inventoryId,{message:'A continuation requires its inventory ID'}).refine(x=>!x.refreshDiscovery||x.offset===0,{message:'Refresh starts from the first page'});
 export const basketQuoteInput = z.strictObject({ wallet: address, tokens: tokens.min(1), destination: z.enum(['USDC', 'ETH']), provider:z.enum(['KYBERSWAP','AERODROME']).default('KYBERSWAP'), amounts:z.record(z.string().regex(/^0x[0-9a-f]{40}$/),z.string().regex(/^[1-9][0-9]{0,77}$/).refine(x=>BigInt(x)<(1n<<256n))).optional() });
 const USDC = getAddress(publicConfig().tokens.USDC);
 const WETH = '0x4200000000000000000000000000000000000006' as Address;
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-export type BasketRuntime = { client: ReturnType<typeof makeClient>; fetch: typeof fetch; allowQuotes: boolean };
+export type BasketRuntime = { client: ReturnType<typeof makeClient>; fetch: typeof fetch; allowQuotes: boolean; inventorySnapshots?:Map<string,InventorySnapshot> };
 const MAX_UINT256=(1n<<256n)-1n;
 const QUOTE_MAX_AGE_MS=60_000;
 export function basketBinding(wallet:string,destination:string,rows:{token:string;amountRaw:string|null}[],createdAt:number,now=Date.now()) {
@@ -21,7 +21,7 @@ export function basketBinding(wallet:string,destination:string,rows:{token:strin
  return {basketKey:createHash('sha256').update(canonical).digest('hex'),expiresAt:new Date(createdAt+QUOTE_MAX_AGE_MS).toISOString(),expired:now>=createdAt+QUOTE_MAX_AGE_MS,executable:false as const};
 }
 function runtime(signal: AbortSignal): BasketRuntime {
- return {client: makeClient(publicConfig(), {batchRpc:true, timeoutMs:10000, signal}), fetch, allowQuotes:process.env.AERODROME_KYBER_QUOTES === 'approved'};
+ return {client: makeClient(publicConfig(), {batchRpc:true, timeoutMs:10000, signal}), fetch, allowQuotes:process.env.AERODROME_KYBER_QUOTES === 'approved', inventorySnapshots};
 }
 export async function boundedJson(response: Response) {
  if(!response.ok) throw Error('Provider unavailable');
@@ -75,6 +75,21 @@ async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRunt
 }
 export const INVENTORY_PAGE_SIZE=16;
 type Candidate={token:Address;price:number|null;suspectedSpam:boolean;spamReason:string|null};
+type InventorySnapshot={inventoryId:string;candidates:Candidate[];expiresAt:number};
+const INVENTORY_SNAPSHOT_MS=10*60_000;
+const inventorySnapshots=new Map<string,InventorySnapshot>();
+function recentSnapshot(store:Map<string,InventorySnapshot>|undefined,wallet:Address) {
+ const key=wallet.toLowerCase(),snapshot=store?.get(key);
+ if(snapshot&&snapshot.expiresAt<=Date.now()){store?.delete(key);return undefined}
+ return snapshot;
+}
+function rememberSnapshot(store:Map<string,InventorySnapshot>|undefined,wallet:Address,snapshot:InventorySnapshot) {
+ if(!store||snapshot.candidates.length>1000)return;
+ const key=wallet.toLowerCase();store.delete(key);
+ for(const [oldKey,old] of store)if(old.expiresAt<=Date.now())store.delete(oldKey);
+ if(store.size>=64)store.delete(store.keys().next().value!);
+ store.set(key,snapshot);
+}
 export function suspiciousMetadata(value:unknown) {
  return typeof value==='string' && /https?:\/\/|www\.|t\.me\/|visit\b.{0,80}\bclaim|claim\b.{0,80}\bairdrop/i.test(value);
 }
@@ -95,15 +110,26 @@ export function inventoryCandidates(data:unknown,manual:Address[]=[]) {
 }
 export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=runtime(signal)) {
  const input=inventoryInput.parse(raw);const warnings=['All valid nonzero ERC-20 entries returned by the indexer are candidates, including entries without prices. This is source coverage, not proof of every asset on Base.','Balances are verified in pages of 16. Pages may have different block times; selected balances are refreshed before quoting.','Estimated values use an unverified indexer price and an on-chain balance; they are not sale quotes. Suspicious metadata flags are only heuristics.'];
- let data:unknown=[];let discoveryStatus:'INDEXER_CANDIDATES'|'MANUAL'|'UNAVAILABLE'=input.tokens?.length?'MANUAL':'INDEXER_CANDIDATES';
+ let data:unknown=[];let discoveryStatus:'INDEXER_CANDIDATES'|'CACHED_CANDIDATES'|'MANUAL'|'UNAVAILABLE'=input.tokens?.length?'MANUAL':'INDEXER_CANDIDATES';
  let discoveryFailure:DiscoveryFailure|null=null;
+ const snapshot=input.tokens?.length?undefined:recentSnapshot(rt.inventorySnapshots,input.wallet);
+ let candidates:Candidate[];
  if(!input.tokens?.length){
-  const discovery=await discoverInventory(input.wallet,signal,rt);data=discovery.data;discoveryFailure=discovery.failure;
-  if(discoveryFailure){discoveryStatus='UNAVAILABLE';warnings.push('Discovery is unavailable. Only core tokens are shown; retry discovery or add token addresses.');}
- }
- const candidates=inventoryCandidates(data,input.tokens??[]);
- const inventoryId=createHash('sha256').update(JSON.stringify({wallet:input.wallet.toLowerCase(),mode:discoveryStatus,tokens:candidates.map(x=>x.token.toLowerCase())})).digest('hex');
+  if(snapshot&&(input.offset>0||!input.refreshDiscovery)){
+   if(input.offset>0&&input.inventoryId!==snapshot.inventoryId)throw new InventoryChangedError('Inventory changed; reload from the first page');
+   candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('Using a recent token list held briefly in server memory. Balances are checked again on Base RPC.');
+  }else{
+   const discovery=await discoverInventory(input.wallet,signal,rt);data=discovery.data;discoveryFailure=discovery.failure;
+   if(discoveryFailure){
+    if(snapshot&&discoveryFailure.code!=='INVALID_RESPONSE'){
+     candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('The indexer could not refresh the token list. Using a recent list; balances are checked again on Base RPC.');
+    }else{discoveryStatus='UNAVAILABLE';warnings.push('Discovery is unavailable. Only core tokens are shown; retry discovery or add token addresses.');candidates=inventoryCandidates([])}
+   }else candidates=inventoryCandidates(data);
+  }
+ }else candidates=inventoryCandidates([],input.tokens);
+ const inventoryId=createHash('sha256').update(JSON.stringify({wallet:input.wallet.toLowerCase(),mode:discoveryStatus==='CACHED_CANDIDATES'?'INDEXER_CANDIDATES':discoveryStatus,tokens:candidates.map(x=>x.token.toLowerCase())})).digest('hex');
  if(input.offset>0&&(input.inventoryId!==inventoryId||input.offset>=candidates.length))throw new InventoryChangedError('Inventory changed; reload from the first page');
+ if(discoveryStatus==='INDEXER_CANDIDATES')rememberSnapshot(rt.inventorySnapshots,input.wallet,{inventoryId,candidates,expiresAt:Date.now()+INVENTORY_SNAPSHOT_MS});
  const page=candidates.slice(input.offset,input.offset+INVENTORY_PAGE_SIZE);
  const block=await anchor(rt);const observed=await balances(input.wallet,page.map(x=>x.token),block.number,signal,rt);await checkBlock(rt,block);
  const rows=observed.map((row,i)=>{const candidate=page[i];const estimate=row.amountFormatted!==null&&candidate.price!==null?Number(row.amountFormatted)*candidate.price:NaN;const suspicious=candidate.suspectedSpam||suspiciousMetadata(row.symbol);return {...row,approximateUsd:Number.isFinite(estimate)&&estimate>=0?estimate:null,suspectedSpam:suspicious,spamReason:suspicious?candidate.spamReason??'Token symbol contains promotional instructions; review separately.':null,blockNumber:block.number.toString()};});

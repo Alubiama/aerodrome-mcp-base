@@ -46,12 +46,18 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   }result.append(filters);
   const normal=inventory.rows.filter(x=>matches(x,filter)),review=inventory.rows.filter(x=>x.suspectedSpam),unknown=normal.filter(x=>x.approximateUsd==null).length;
   const scope=filter==='all'?'All loaded tokens':filter==='u1'?'Under $1':'Under $5';
-  const note=el('p',`${scope}: ${normal.length} shown of ${inventory.rows.length} loaded. ${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}${p.nextOffset!==null?'Load more to check the remaining candidates.':''}`,'meta');note.setAttribute('role','status');result.append(note);
+  const remaining=p.nextOffset===null?0:p.totalCandidates-p.nextOffset;
+  const note=el('p',`${scope}: ${normal.length} shown of ${inventory.rows.length} checked. ${remaining?`${remaining} candidate contracts still unchecked. Filters apply only to checked tokens. `:'All candidate contracts checked. '}${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}`,'meta');note.setAttribute('role','status');result.append(note);
+  if(remaining){const next=el('button',busy?'Checking…':`Check next ${Math.min(16,remaining)} token contracts`,'more next-page');next.type='button';next.disabled=busy;next.onclick=()=>load(true);result.append(next)}
   if(!normal.length)result.append(el('p','No loaded tokens match this filter. Try All or load more.','meta'));
   if(inventory.discoveryStatus==='UNAVAILABLE'){
    const reasons={RATE_LIMITED:'The token indexer is rate limited. Wait a minute before retrying.',TIMEOUT:'The token indexer did not respond in time.',UPSTREAM:'The token indexer returned an error.',INVALID_RESPONSE:'The token indexer response could not be verified.',NETWORK:'The token indexer could not be reached.'};
    result.append(el('p',`${reasons[inventory.discoveryFailure?.code]||'Token discovery is unavailable.'} Only USDC and WETH were checked. Other balances are not known to be zero.`,'bad'));
    const retry=el('button',busy?'Checking…':'Retry discovery','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry,el('p','Retry keeps your selection where refreshed balances still allow it. You can also enter token contract addresses in Choose tokens manually.','meta'));
+  }
+  if(inventory.discoveryStatus==='CACHED_CANDIDATES'){
+   result.append(el('p',inventory.discoveryFailure?'The token indexer did not refresh. Showing a recent token list; balances were checked again on Base.':'Showing a recent token list; balances were checked again on Base.','meta'));
+   const retry=el('button',busy?'Checking…':'Refresh token list','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry);
   }
   const list=el('div','','tokens');normal.forEach(x=>list.append(tokenRow(x)));result.append(list);
   if(review.length){const d=el('details','','review');d.append(el('summary',`Needs review (${review.length})`),el('p','Flagged by metadata only. These tokens cannot be selected here.','meta'));review.forEach(x=>d.append(tokenRow(x)));result.append(d)}
@@ -83,7 +89,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   if(!more&&!preserve){inventory=null;selected.clear();amounts.clear();readKept();result.textContent='Loading balances…'}else render();
   const offset=more?inventory.pagination.nextOffset:0,oldId=more?inventory.pagination.inventoryId:null;
   try{
-   const body={wallet:w,offset};if(ts.length)body.tokens=ts;if(oldId)body.inventoryId=oldId;
+   const body={wallet:w,offset};if(ts.length)body.tokens=ts;if(oldId)body.inventoryId=oldId;if(retry)body.refreshDiscovery=true;
    const response=await fetch('/api/basket/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal}),data=await response.json();if(n!==sequence)return;
    if(!response.ok)throw Error(data.error?.message||'Inventory unavailable. Reload to try again.');const p=data.pagination;
    if(!same(data.wallet,w)||!Array.isArray(data.rows)||data.rows.length>16||!p||p.offset!==offset||!Number.isInteger(p.totalCandidates)||!(/^[a-f0-9]{64}$/).test(p.inventoryId)||more&&oldId!==p.inventoryId||p.nextOffset!==null&&p.nextOffset!==offset+data.rows.length||data.rows.some(x=>!address(x.token))||new Set(data.rows.map(x=>x.token.toLowerCase())).size!==data.rows.length)throw Error('Inventory mismatch. Reload from the first page.');
