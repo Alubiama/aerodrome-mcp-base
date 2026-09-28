@@ -5,7 +5,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
  const $=s=>document.querySelector(s), wallet=$('#w'), manual=$('#m'), result=$('#r'), error=$('#e');
  const WETH='0x4200000000000000000000000000000000000006',USDC='0x833589fcD6eDb6e08f4c7c32d4f71b54bdA02913'.toLowerCase();
  let amounts=new Map();
- let inventory=null, selected=new Set(), kept=new Set(), filter='all', destination='USDC', controller, sequence=0, expiry, busy=false;
+ let inventory=null, selected=new Set(), reviewed=new Set(), kept=new Set(), filter='all', destination='USDC', controller, sequence=0, expiry, busy=false;
  const address=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x)&&!/^0x0{40}$/i.test(x);
  const same=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase();
  const el=(tag,text='',cls='')=>{const n=document.createElement(tag);n.textContent=text;n.className=cls;return n};
@@ -20,18 +20,25 @@ import {sampledSelectionChoice} from './comparison-choice.js';
  function renderSavedAddresses(){savedList.replaceChildren();for(const item of savedAddresses){const row=el('div','','saved-address-row'),code=el('code',item),view=el('button','View'),remove=el('button','Remove');view.type=remove.type='button';view.setAttribute('aria-label',`View ${item}`);remove.setAttribute('aria-label',`Remove ${item}`);view.onclick=()=>{wallet.value=item;wallet.dispatchEvent(new Event('input',{bubbles:true}));manual.value='';manual.dispatchEvent(new Event('input',{bubbles:true}));load(false)};remove.onclick=()=>{if(persistSavedAddresses(savedAddresses.filter(x=>x!==item)))savedStatus.textContent='Address removed from this browser.'};row.append(code,view,remove);savedList.append(row)}}
  $('#save-address').onclick=()=>{const item=wallet.value.trim().toLowerCase();if(!address(item)){savedStatus.textContent='Enter a valid public Base address first.';return}if(savedAddresses.includes(item)){savedStatus.textContent='This address is already saved.';return}if(savedAddresses.length>=10){savedStatus.textContent='Remove an address before saving another.';return}if(persistSavedAddresses([...savedAddresses,item]))savedStatus.textContent='Address saved in this browser.'};
  function short(value){if(typeof value!=='string'||!/^[-]?\d+(\.\d+)?$/.test(value))return 'Unknown';const sign=value.startsWith('-')?'-':'';const [a,b='']=value.replace(/^-/,'').split('.');const tail=b.slice(0,6).replace(/0+$/,'');if(a==='0'&&!tail&&/[1-9]/.test(b))return sign+'<0.000001';return sign+a+(tail?'.'+tail:'')}
- function eligible(row){try{return !row.suspectedSpam&&address(row.token)&&row.status==='OBSERVED'&&row.amountRaw!==null&&BigInt(row.amountRaw)>0n&&Number.isInteger(row.decimals)&&row.decimals>=0&&row.decimals<=36&&!kept.has(row.token.toLowerCase())}catch{return false}}
+ const riskLevel=row=>row.riskLevel==='BLOCKED_METADATA'||row.suspectedSpam?'BLOCKED_METADATA':row.riskLevel==='KNOWN_CONTRACT'&&(same(row.token,USDC)||same(row.token,WETH))?'KNOWN_CONTRACT':'UNVERIFIED';
+ function eligible(row){try{return riskLevel(row)!=='BLOCKED_METADATA'&&(riskLevel(row)==='KNOWN_CONTRACT'||reviewed.has(row.token.toLowerCase()))&&address(row.token)&&row.status==='OBSERVED'&&row.amountRaw!==null&&BigInt(row.amountRaw)>0n&&Number.isInteger(row.decimals)&&row.decimals>=0&&row.decimals<=36&&!kept.has(row.token.toLowerCase())}catch{return false}}
  function invalidate(){error.textContent='';controller?.abort();sequence++;clearTimeout(expiry);result.querySelector('.quote')?.remove();busy=false}
- function reset(){invalidate();inventory=null;selected.clear();amounts.clear();$('#mc').textContent=`${manualTokens().length} / 16`;result.textContent='Load a wallet to view available tokens.'}
+ function reset(){invalidate();inventory=null;selected.clear();reviewed.clear();amounts.clear();$('#mc').textContent=`${manualTokens().length} / 16`;result.textContent='Load a wallet to view available tokens.'}
  function showValue(row){return row.approximateUsd==null?'Value unknown':row.approximateUsd>0&&row.approximateUsd<0.01?'~<$0.01':`~$${row.approximateUsd.toLocaleString('en-US',{maximumFractionDigits:2})}`}
  function tokenRow(row){
   const node=el('article','','row'),check=el('input'),id=row.token.toLowerCase();check.type='checkbox';check.setAttribute('aria-label',`Select ${row.symbol||row.token}`);check.checked=selected.has(id);check.disabled=!eligible(row)||busy;
   check.onchange=()=>{invalidate();if(check.checked&&selected.size>=16){error.textContent='Select no more than 16 tokens.'}else{check.checked?selected.add(id):selected.delete(id);if(check.checked&&!amounts.has(id))amounts.set(id,id===WETH?'':row.amountFormatted)}render()};
-  const info=el('div');info.append(el('div',row.symbol||row.token,'sym'),el('div',row.suspectedSpam?'Needs review':kept.has(id)?'Kept':row.status==='READ_FAILED'?'Balance unknown':row.status==='ZERO_BALANCE'?'No balance':showValue(row),'meta'));
+  const risk=riskLevel(row);
+  const info=el('div');info.append(el('div',row.symbol||row.token,'sym'),el('div',risk==='BLOCKED_METADATA'?'Blocked · suspicious metadata':risk==='UNVERIFIED'&&!reviewed.has(id)?'Unverified contract · open Details before selecting':risk==='UNVERIFIED'?'Address reviewed · still unverified':kept.has(id)?'Kept':row.status==='READ_FAILED'?'Balance unknown':row.status==='ZERO_BALANCE'?'No balance':showValue(row),'meta'));
   const amount=el('div',row.amountFormatted===null?'Unknown':short(row.amountFormatted),'bal');
   if(!row.suspectedSpam){const keep=el('button',kept.has(id)?'Unkeep':'Keep','keep');keep.disabled=busy;keep.setAttribute('aria-label',`${kept.has(id)?'Unkeep':'Keep'} ${row.symbol||row.token}`);keep.onclick=()=>{invalidate();kept.has(id)?kept.delete(id):kept.add(id);saveKept();selected.delete(id);render()};amount.append(keep)}
   const details=el('details');details.append(el('summary','Details'),el('p',row.token,'meta'),el('p',`Exact amount: ${row.amountFormatted??'UNKNOWN'}`,'meta'),el('p',`Value: ${showValue(row)}`,'meta'),el('p',`Checked at Base block ${row.blockNumber}`,'meta'));
-  if(row.suspectedSpam)details.append(el('p',row.spamReason||'Metadata needs review. This is not a security verdict.','meta'));
+  if(risk==='BLOCKED_METADATA')details.append(el('p',row.spamReason||'Metadata needs review. This is not a security verdict.','bad'));
+  if(risk==='UNVERIFIED'){
+   details.append(el('p','This contract has not been verified by Collect. Check its full Base contract address independently. A quote or simulation cannot prove that a token is safe.','meta'));
+   const explorer=el('a','Inspect contract on Base Blockscout ↗');explorer.href=`https://base.blockscout.com/token/${row.token}`;explorer.target='_blank';explorer.rel='noopener noreferrer';details.append(explorer);
+   const label=el('label','','review-contract'),confirm=el('input');confirm.type='checkbox';confirm.setAttribute('aria-label',`I checked contract ${row.token}`);confirm.checked=reviewed.has(id);confirm.disabled=busy;confirm.onchange=()=>{invalidate();if(confirm.checked)reviewed.add(id);else{reviewed.delete(id);selected.delete(id);amounts.delete(id)}render()};label.append(confirm,el('span','I checked this contract address for read-only preview'));details.append(label);
+  }
   if(selected.has(id)){const label=el('label','Amount to exchange','amount-label'),input=el('input');input.type='text';input.inputMode='decimal';input.setAttribute('aria-label',`Amount for ${row.symbol||row.token}`);input.value=amounts.get(id)||'';input.placeholder=id===WETH?'Enter WETH amount':'0';input.disabled=busy;input.oninput=()=>{invalidate();amounts.set(id,input.value.trim());const total=result.querySelector('.collection-total');if(total)total.textContent='—'};label.append(input);details.append(el('p',id===WETH?'WETH needs an explicit amount. Your remaining WETH stays in your wallet.':'The amount above is the amount to exchange.','meta'));info.append(label)}
   node.append(check,info,amount,details);return node;
  }
@@ -44,10 +51,11 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    const count=inventory.rows.filter(x=>matches(x,value)).length,b=el('button',`${label} (${count})`);
    b.setAttribute('aria-label',label);b.setAttribute('aria-pressed',String(filter===value));b.onclick=()=>{invalidate();filter=value;render()};filters.append(b);
   }result.append(filters);
-  const normal=inventory.rows.filter(x=>matches(x,filter)),review=inventory.rows.filter(x=>x.suspectedSpam),unknown=normal.filter(x=>x.approximateUsd==null).length;
+  const normal=inventory.rows.filter(x=>matches(x,filter)),review=inventory.rows.filter(x=>riskLevel(x)==='BLOCKED_METADATA'),unknown=normal.filter(x=>x.approximateUsd==null).length;
   const scope=filter==='all'?'All loaded tokens':filter==='u1'?'Under $1':'Under $5';
   const remaining=p.nextOffset===null?0:p.totalCandidates-p.nextOffset;
   const note=el('p',`${scope}: ${normal.length} shown of ${inventory.rows.length} checked. ${remaining?`${remaining} candidate contracts still unchecked. Filters apply only to checked tokens. `:'All candidate contracts checked. '}${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}`,'meta');note.setAttribute('role','status');result.append(note);
+  result.append(el('p','Unknown token contracts require address review before selection. This unlocks read-only preview only; it does not mark a token safe.','risk-note'));
   if(remaining){const next=el('button',busy?'Checking…':`Check next ${Math.min(16,remaining)} token contracts`,'more next-page');next.type='button';next.disabled=busy;next.onclick=()=>load(true);result.append(next)}
   if(!normal.length)result.append(el('p','No loaded tokens match this filter. Try All or load more.','meta'));
   if(inventory.discoveryStatus==='UNAVAILABLE'){
@@ -60,7 +68,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    const retry=el('button',busy?'Checking…':'Refresh token list','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry);
   }
   const list=el('div','','tokens');normal.forEach(x=>list.append(tokenRow(x)));result.append(list);
-  if(review.length){const d=el('details','','review');d.append(el('summary',`Needs review (${review.length})`),el('p','Flagged by metadata only. These tokens cannot be selected here.','meta'));review.forEach(x=>d.append(tokenRow(x)));result.append(d)}
+  if(review.length){const d=el('details','','review');d.append(el('summary',`Blocked metadata (${review.length})`),el('p','Promotional instructions or imitation of a known Base token. These contracts cannot be selected here. This is a heuristic, not a complete scam check.','meta'));review.forEach(x=>d.append(tokenRow(x)));result.append(d)}
   result.append(el('p','Quotes via Aerodrome · classic pools only','meta'));const controls=el('div','','controls'),out=el('select');out.setAttribute('aria-label','Output asset');for(const name of ['USDC','ETH']){const o=el('option',name);o.value=name;out.append(o)}out.value=destination;out.onchange=()=>{invalidate();destination=out.value;render()};
   const preview=el('button',busy?'Checking…':'Preview','preview');preview.disabled=busy||!selected.size;preview.onclick=quote;controls.append(el('span',`${selected.size} selected`,'meta'),out,preview);result.append(controls);
   if(p.nextOffset!==null){const more=el('button',busy?'Loading…':'Load more','more');more.disabled=busy;more.onclick=()=>load(true);result.append(more)}
@@ -86,7 +94,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   if(more&&(!inventory||inventory.pagination.nextOffset===null)){error.textContent='Load a wallet before requesting another page.';return}
   const preserve=retry&&inventory&&same(inventory.wallet,w)&&!ts.length;
   invalidate();const n=sequence;controller=new AbortController();busy=true;error.textContent='';
-  if(!more&&!preserve){inventory=null;selected.clear();amounts.clear();readKept();result.textContent='Loading balances…'}else render();
+  if(!more&&!preserve){inventory=null;selected.clear();reviewed.clear();amounts.clear();readKept();result.textContent='Loading balances…'}else render();
   const offset=more?inventory.pagination.nextOffset:0,oldId=more?inventory.pagination.inventoryId:null;
   try{
    const body={wallet:w,offset};if(ts.length)body.tokens=ts;if(oldId)body.inventoryId=oldId;if(retry)body.refreshDiscovery=true;
@@ -98,7 +106,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    busy=false;render();
   }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;if(inventory)render();else result.textContent='No inventory loaded.'}
  }
- function selectedAmounts(){const out={};for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));const raw=rawAmount(amounts.get(token)||'',row.decimals);if(BigInt(raw)>BigInt(row.amountRaw))throw Error(`Amount exceeds ${row.symbol||'token'} balance.`);out[token]=raw}return out}
+ function selectedAmounts(){const out={};for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));if(!row||!eligible(row))throw Error('A selected token needs a fresh contract review. Reload the wallet.');const raw=rawAmount(amounts.get(token)||'',row.decimals);if(BigInt(raw)>BigInt(row.amountRaw))throw Error(`Amount exceeds ${row.symbol||'token'} balance.`);out[token]=raw}return out}
  async function quote(){
   let limits;try{limits=selectedAmounts()}catch(e){error.textContent=e.message;return}
   invalidate();const n=sequence,w=inventory.wallet,tokens=[...selected],output=destination;controller=new AbortController();busy=true;error.textContent='';render();

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {inventoryCandidates,readBasketInventory,quoteBasket,inventoryInput,basketQuoteInput,boundedJson,basketBinding,type BasketRuntime} from './basket.js';
+import {inventoryCandidates,impersonatesCoreToken,readBasketInventory,quoteBasket,inventoryInput,basketQuoteInput,boundedJson,basketBinding,type BasketRuntime} from './basket.js';
 const wallet='0x0000000000000000000000000000000000000001';
 const token='0x0000000000000000000000000000000000000002';
 const usdc='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -11,7 +11,7 @@ const rt:BasketRuntime={allowQuotes:false,client:{
   if(mode==='balanceFailure'&&functionName==='balanceOf')throw Error('private error');
   if(functionName==='balanceOf')return mode==='zero'?0n:1230000n;
   if(functionName==='decimals')return 6;
-  if(functionName==='symbol')return '<script>untrusted</script>';
+  if(functionName==='symbol')return mode==='spoof'?'USDC':'<script>untrusted</script>';
  }
 } as any,fetch:(async(url:URL|string)=>{
  fetches++;const u=new URL(url);
@@ -25,6 +25,11 @@ for(const value of [{wallet:'bad'},{wallet,tokens:[token,token]},{wallet,tokens:
 assert.equal(basketQuoteInput.safeParse({wallet,tokens:[],destination:'USDC'}).success,false);
 const inventory=await readBasketInventory({wallet,tokens:[token]},signal,rt);
 assert.equal(fetches,0);assert.equal(inventory.rows[0].amountFormatted,'1.23');
+assert.equal(inventory.rows[0].riskLevel,'UNVERIFIED');
+assert.equal(impersonatesCoreToken(token,'USDC'),true);
+assert.equal(impersonatesCoreToken(usdc,'USDC'),false);
+assert.equal(inventoryCandidates([{value:'1',token:{address_hash:token,type:'ERC-20',symbol:'USDC'}}]).find(x=>x.token.toLowerCase()===token.toLowerCase())?.suspectedSpam,true);
+mode='spoof';const spoofed=await readBasketInventory({wallet,tokens:[token]},signal,rt);assert.equal(spoofed.rows.find(x=>x.token.toLowerCase()===token.toLowerCase())?.riskLevel,'BLOCKED_METADATA');mode='ok';
 let result=await quoteBasket({wallet,tokens:[token],destination:'USDC'},signal,rt);
 assert.equal(fetches,0,'approval gate sends no provider traffic');assert.equal(result.totalOutputFormatted,null);assert.equal(result.rows[0].status,'PROVIDER_APPROVAL_REQUIRED');
 rt.allowQuotes=true;result=await quoteBasket({wallet,tokens:[token],destination:'USDC'},signal,rt);

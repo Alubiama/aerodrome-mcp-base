@@ -139,6 +139,11 @@ function rememberSnapshot(store:Map<string,InventorySnapshot>|undefined,wallet:A
 export function suspiciousMetadata(value:unknown) {
  return typeof value==='string' && /https?:\/\/|www\.|t\.me\/|visit\b.{0,80}\bclaim|claim\b.{0,80}\bairdrop/i.test(value);
 }
+export function impersonatesCoreToken(token:string,symbol:unknown) {
+ if(typeof symbol!=='string')return false;
+ const name=symbol.trim().toUpperCase();
+ return name==='USDC'&&token.toLowerCase()!==USDC.toLowerCase()||name==='WETH'&&token.toLowerCase()!==WETH.toLowerCase();
+}
 export function inventoryCandidates(data:unknown,manual:Address[]=[]) {
  if(!Array.isArray(data))throw Error('Invalid inventory');
  const map=new Map<string,Candidate>();
@@ -148,9 +153,10 @@ export function inventoryCandidates(data:unknown,manual:Address[]=[]) {
   if(item?.token?.type!=='ERC-20'||typeof raw!=='string'||!isAddress(raw)||/^0x0{40}$/i.test(raw)||typeof item.value!=='string'||!/^\d{1,78}$/.test(item.value)||BigInt(item.value)===0n||BigInt(item.value)>MAX_UINT256)continue;
   const token=getAddress(raw);const key=token.toLowerCase();
   const price=typeof item.token.exchange_rate==='string'||typeof item.token.exchange_rate==='number'?Number(item.token.exchange_rate):NaN;
-  const suspicious=suspiciousMetadata(item.token.symbol)||suspiciousMetadata(item.token.name);
+  const impersonation=impersonatesCoreToken(token,item.token.symbol);
+  const suspicious=suspiciousMetadata(item.token.symbol)||suspiciousMetadata(item.token.name)||impersonation;
   const existing=map.get(key);
-  map.set(key,{token,price:Number.isFinite(price)&&price>0?price:existing?.price??null,suspectedSpam:suspicious||existing?.suspectedSpam===true,spamReason:suspicious?'Token metadata contains a promotional link or claim instruction. This is a heuristic, not a security verdict.':existing?.spamReason??null});
+  map.set(key,{token,price:Number.isFinite(price)&&price>0?price:existing?.price??null,suspectedSpam:suspicious||existing?.suspectedSpam===true,spamReason:impersonation?'This contract uses the symbol of a different known Base token. Check its contract address.':suspicious?'Token metadata contains a promotional link or claim instruction. This is a heuristic, not a security verdict.':existing?.spamReason??null});
  }
  return [...map.values()].sort((a,b)=>Number(a.suspectedSpam)-Number(b.suspectedSpam)||Number(b.price!==null)-Number(a.price!==null)||a.token.toLowerCase().localeCompare(b.token.toLowerCase()));
 }
@@ -179,7 +185,7 @@ export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=ru
  if(discoveryStatus==='INDEXER_CANDIDATES')rememberSnapshot(rt.inventorySnapshots,input.wallet,{inventoryId,candidates,expiresAt:Date.now()+INVENTORY_SNAPSHOT_MS});
  const page=candidates.slice(input.offset,input.offset+INVENTORY_PAGE_SIZE);
  const block=await anchor(rt);const observed=await balances(input.wallet,page.map(x=>x.token),block.number,signal,rt);await checkBlock(rt,block);
- const rows=observed.map((row,i)=>{const candidate=page[i];const estimate=row.amountFormatted!==null&&candidate.price!==null?Number(row.amountFormatted)*candidate.price:NaN;const suspicious=candidate.suspectedSpam||suspiciousMetadata(row.symbol);return {...row,approximateUsd:Number.isFinite(estimate)&&estimate>=0?estimate:null,suspectedSpam:suspicious,spamReason:suspicious?candidate.spamReason??'Token symbol contains promotional instructions; review separately.':null,blockNumber:block.number.toString()};});
+ const rows=observed.map((row,i)=>{const candidate=page[i];const estimate=row.amountFormatted!==null&&candidate.price!==null?Number(row.amountFormatted)*candidate.price:NaN;const impersonation=impersonatesCoreToken(row.token,row.symbol);const suspicious=candidate.suspectedSpam||suspiciousMetadata(row.symbol)||impersonation;const riskLevel=suspicious?'BLOCKED_METADATA':row.token.toLowerCase()===USDC.toLowerCase()||row.token.toLowerCase()===WETH.toLowerCase()?'KNOWN_CONTRACT':'UNVERIFIED';return {...row,approximateUsd:Number.isFinite(estimate)&&estimate>=0?estimate:null,suspectedSpam:suspicious,riskLevel,spamReason:suspicious?candidate.spamReason??(impersonation?'This contract uses the symbol of a different known Base token. Check its contract address.':'Token symbol contains promotional instructions; review separately.'):null,blockNumber:block.number.toString()};});
  const next=input.offset+page.length;
  return {wallet:input.wallet,blockNumber:block.number.toString(),observedAt:new Date().toISOString(),rows,warnings,discoveryStatus,discoveryFailure,pagination:{offset:input.offset,nextOffset:next<candidates.length?next:null,totalCandidates:candidates.length,inventoryId}};
 }
