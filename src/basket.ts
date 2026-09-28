@@ -114,7 +114,8 @@ async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRunt
   const failure=discoveryFailure(e,primarySignal);
   if(!failure.retryable||failure.code==='RATE_LIMITED')return {data:[],failure,source:null};
  }
- const pageSignal=AbortSignal.any([signal,AbortSignal.timeout(timeout)]);
+ // A complete token list can span 20 sequential pages; keep this within the 45s inventory request budget.
+ const pageSignal=AbortSignal.any([signal,AbortSignal.timeout(rt.discoveryTimeoutMs??25_000)]);
  try {return {data:await pagedDiscovery(wallet,pageSignal,rt),failure:null,source:'PAGED' as const}}
  catch(e){signal.throwIfAborted();return {data:[],failure:discoveryFailure(e,pageSignal),source:null}}
 }
