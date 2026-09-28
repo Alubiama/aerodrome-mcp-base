@@ -13,7 +13,7 @@ export const basketQuoteInput = z.strictObject({ wallet: address, tokens: tokens
 const USDC = getAddress(publicConfig().tokens.USDC);
 const WETH = '0x4200000000000000000000000000000000000006' as Address;
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-export type BasketRuntime = { client: ReturnType<typeof makeClient>; fetch: typeof fetch; allowQuotes: boolean; inventorySnapshots?:Map<string,InventorySnapshot> };
+export type BasketRuntime = { client: ReturnType<typeof makeClient>; fetch: typeof fetch; allowQuotes: boolean; inventorySnapshots?:Map<string,InventorySnapshot>; discoveryTimeoutMs?:number };
 const MAX_UINT256=(1n<<256n)-1n;
 const QUOTE_MAX_AGE_MS=60_000;
 export function basketBinding(wallet:string,destination:string,rows:{token:string;amountRaw:string|null}[],createdAt:number,now=Date.now()) {
@@ -33,8 +33,7 @@ export async function boundedJson(response: Response) {
 }
 type Row={token:Address;symbol:string;decimals:number|null;amountRaw:string|null;amountFormatted:string|null;status:string};
 async function balances(wallet:Address, addresses:Address[], blockNumber:bigint, signal:AbortSignal, rt:BasketRuntime) {
- const rows:Row[]=[];
- for(const token of addresses) {
+ const readOne=async(token:Address):Promise<Row>=>{
   signal.throwIfAborted();
   const row:Row={token,symbol:token,decimals:null,amountRaw:null,amountFormatted:null,status:'READ_FAILED'};
   const reads=await Promise.allSettled([
@@ -47,8 +46,10 @@ async function balances(wallet:Address, addresses:Address[], blockNumber:bigint,
   if(reads[0].status==='fulfilled' && typeof reads[0].value==='bigint' && reads[0].value>=0n && reads[0].value<=MAX_UINT256)row.amountRaw=reads[0].value.toString();
   if(reads[1].status==='fulfilled' && Number.isInteger(reads[1].value) && Number(reads[1].value)>=0 && Number(reads[1].value)<=36)row.decimals=Number(reads[1].value);
   if(row.amountRaw!==null && row.decimals!==null) {row.amountFormatted=formatUnits(BigInt(row.amountRaw),row.decimals);row.status=BigInt(row.amountRaw)>0n?'OBSERVED':'ZERO_BALANCE';}
-  rows.push(row);
- }
+  return row;
+ };
+ const rows:Row[]=[];
+ for(let i=0;i<addresses.length;i+=4)rows.push(...await Promise.all(addresses.slice(i,i+4).map(readOne)));
  return rows;
 }
 async function anchor(rt:BasketRuntime) {if(await rt.client.getChainId()!==8453)throw Error('Wrong chain');return rt.client.getBlock();}
@@ -56,22 +57,66 @@ async function checkBlock(rt:BasketRuntime, block:{number:bigint;hash:string}) {
 export class InventoryChangedError extends Error {}
 type DiscoveryFailure={code:'RATE_LIMITED'|'TIMEOUT'|'UPSTREAM'|'INVALID_RESPONSE'|'NETWORK';retryable:boolean};
 class DiscoveryHttpError extends Error {constructor(readonly status:number){super('Discovery provider unavailable');}}
+class DiscoveryFormatError extends Error {}
+const DISCOVERY_MAX_PAGES=20;
+const DISCOVERY_MAX_ITEMS=1000;
+function discoveryFailure(error:unknown,requestSignal:AbortSignal):DiscoveryFailure {
+ if(requestSignal.aborted)return {code:'TIMEOUT',retryable:true};
+ if(error instanceof DiscoveryHttpError)return {code:error.status===429?'RATE_LIMITED':'UPSTREAM',retryable:error.status===429||error.status>=500};
+ if(error instanceof TypeError)return {code:'NETWORK',retryable:true};
+ return {code:'INVALID_RESPONSE',retryable:false};
+}
+async function discoveryJson(url:URL,signal:AbortSignal,rt:BasketRuntime) {
+ const response=await rt.fetch(url,{signal,redirect:'error'});
+ if(!response.ok){await response.body?.cancel();throw new DiscoveryHttpError(response.status)}
+ return boundedJson(response);
+}
+async function pagedDiscovery(wallet:Address,signal:AbortSignal,rt:BasketRuntime) {
+ const items:unknown[]=[];const seen=new Set<string>();
+ let next:Record<string,unknown>|null={};
+ for(let page=0;next!==null&&page<DISCOVERY_MAX_PAGES;page++){
+  const url=new URL(`https://base.blockscout.com/api/v2/addresses/${wallet}/tokens`);
+  url.searchParams.set('type','ERC-20');
+  if(Object.keys(next).length>8)throw new DiscoveryFormatError('Too many cursor fields');
+  for(const [key,value] of Object.entries(next)){
+   if(!/^[a-z][a-z0-9_]{0,31}$/.test(key)||key==='type')throw new DiscoveryFormatError('Invalid cursor key');
+   if(value===null)continue;
+   if((typeof value!=='string'&&typeof value!=='number'&&typeof value!=='boolean')||String(value).length>128)throw new DiscoveryFormatError('Invalid cursor value');
+   url.searchParams.set(key,String(value));
+  }
+  const cursor=url.search;
+  if(seen.has(cursor))throw new DiscoveryFormatError('Repeated cursor');
+  seen.add(cursor);
+  const body=await discoveryJson(url,signal,rt);
+  if(!body||typeof body!=='object'||Array.isArray(body)||!Array.isArray((body as any).items))throw new DiscoveryFormatError('Invalid page');
+  const pageItems=(body as any).items as unknown[];
+  if(!pageItems.length&&((body as any).next_page_params??null)!==null)throw new DiscoveryFormatError('Empty continuation');
+  items.push(...pageItems);
+  if(items.length>DISCOVERY_MAX_ITEMS)throw new DiscoveryFormatError('Inventory exceeds limit');
+  const cursorData=(body as any).next_page_params;
+  if(cursorData===null)next=null;
+  else if(cursorData&&typeof cursorData==='object'&&!Array.isArray(cursorData))next=cursorData as Record<string,unknown>;
+  else throw new DiscoveryFormatError('Invalid next page');
+ }
+ if(next!==null)throw new DiscoveryFormatError('Inventory pages exceed limit');
+ return items;
+}
 async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRuntime) {
- const discoverySignal=AbortSignal.any([signal,AbortSignal.timeout(5000)]);
- for(let attempt=0;attempt<2;attempt++)try {
-  const response=await rt.fetch(`https://base.blockscout.com/api/v2/addresses/${wallet}/token-balances`,{signal:discoverySignal,redirect:'error'});
-  if(!response.ok){await response.body?.cancel();throw new DiscoveryHttpError(response.status);}
-  const data=await boundedJson(response);
-  if(!Array.isArray(data))throw Error('Invalid inventory');
-  return {data,failure:null};
+ const timeout=rt.discoveryTimeoutMs??10_000;
+ const primarySignal=AbortSignal.any([signal,AbortSignal.timeout(timeout)]);
+ try {
+  const url=new URL(`https://base.blockscout.com/api/v2/addresses/${wallet}/token-balances`);
+  const data=await discoveryJson(url,primarySignal,rt);
+  if(!Array.isArray(data))throw new DiscoveryFormatError('Invalid inventory');
+  return {data,failure:null,source:'ALL' as const};
  }catch(e){
   signal.throwIfAborted();
-  const failure:DiscoveryFailure=discoverySignal.aborted?{code:'TIMEOUT',retryable:true}:e instanceof DiscoveryHttpError?{code:e.status===429?'RATE_LIMITED':'UPSTREAM',retryable:e.status===429||e.status>=500}:e instanceof TypeError?{code:'NETWORK',retryable:true}:{code:'INVALID_RESPONSE',retryable:false};
-  // A single retry shares the same five-second budget. Do not hammer 429s or retry invalid data.
-  if(attempt===0&&!discoverySignal.aborted&&(failure.code==='NETWORK'||e instanceof DiscoveryHttpError&&e.status>=500))continue;
-  return {data:[],failure};
+  const failure=discoveryFailure(e,primarySignal);
+  if(!failure.retryable||failure.code==='RATE_LIMITED')return {data:[],failure,source:null};
  }
- throw Error('Discovery attempts exhausted');
+ const pageSignal=AbortSignal.any([signal,AbortSignal.timeout(timeout)]);
+ try {return {data:await pagedDiscovery(wallet,pageSignal,rt),failure:null,source:'PAGED' as const}}
+ catch(e){signal.throwIfAborted();return {data:[],failure:discoveryFailure(e,pageSignal),source:null}}
 }
 export const INVENTORY_PAGE_SIZE=16;
 type Candidate={token:Address;price:number|null;suspectedSpam:boolean;spamReason:string|null};
@@ -120,6 +165,7 @@ export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=ru
    candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('Using a recent token list held briefly in server memory. Balances are checked again on Base RPC.');
   }else{
    const discovery=await discoverInventory(input.wallet,signal,rt);data=discovery.data;discoveryFailure=discovery.failure;
+   if(discovery.source==='PAGED')warnings.push('The all-balances indexer request failed; token candidates were recovered through its complete paginated ERC-20 list.');
    if(discoveryFailure){
     if(snapshot&&discoveryFailure.code!=='INVALID_RESPONSE'){
      candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('The indexer could not refresh the token list. Using a recent list; balances are checked again on Base RPC.');
