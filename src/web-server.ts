@@ -63,7 +63,7 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
       const release=admission.acquire(req.socket.remoteAddress??'unknown');
       if(!release){res.setHeader('Retry-After','60');error(res,429,'BUSY','Request limit reached. Wait before trying again.');return;}
       const controller=new AbortController();let timedOut=false;
-      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??(url.pathname.endsWith('/compare')?60000:30000));
+      const timer=setTimeout(()=>{timedOut=true;controller.abort();},options.deadlineMs??(url.pathname.endsWith('/compare')?60000:url.pathname.endsWith('/inventory')?45000:30000));
       const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);
       try {
         const stopped=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(Error('Aborted')),{once:true}));
