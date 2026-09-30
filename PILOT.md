@@ -2,22 +2,33 @@
 
 ## One bounded job
 
-Embed one allocation inspection panel in an existing test application. The candidate integrator might maintain a veAERO dashboard or an AI assistant; no project has agreed to participate yet.
+Independently reproduce the existing [TRY_IT.md](docs/TRY_IT.md) job — explain a reward change — and then test whether its structured evidence improves one dashboard or agent workflow that a developer already maintains. No external developer has agreed to this pilot yet.
+
+This pilot is the **first** external integration candidate. The original allocation inspection panel pilot is preserved below as a separate, later candidate.
 
 ## Acceptance
 
-1. A developer other than the author installs from the public release, without private configuration or private setup help.
-2. Run `example:stdio` and render the Equal split plus its three stress results. Check expected raw SYN subtotals: 20, 16, 14, 10.
-3. Use the partial fixture. The UI must show incomplete coverage and known-entry subtotals, never a complete reward claim.
-4. Record setup time, code changes, failed steps and whether the panel solves an existing problem better than the developer's current approach. Sanitize artifacts before sharing.
-5. Stop after one test integration session. If the result is correct and the developer wants to keep it, fix their largest integration obstacle next. If they already solve this adequately, record that and do not add speculative features. If installation or evidence fails, fix it and repeat the failed step; adoption remains unproven.
+1. Before installation, record one recent instance when the developer had to explain a reward change, what they actually used, and why their existing approach was sufficient or insufficient. Do not infer demand from interest in the demo.
+2. A developer other than the author installs from the public release using only the published [TRY_IT.md](docs/TRY_IT.md) steps, without private configuration or private setup help.
+3. Reproduce the reward-change report on synthetic fixture data alone:
+   - `BASELINE_CREATED` contains no changes (no earlier observation to compare).
+   - `COMPARED` contains the reward row with `before: "100"`, `after: "125"`, `deltaRaw: "25"`, and a finding identifying blocks `100` and `101`.
+4. Confirm the run needed no wallet, signature, RPC call, API key or model.
+5. Keep the boundaries visible: these are raw fixture units, not dollars, APR or live AERO rewards; the cause of the change, whether a claim occurred, and realized income remain unknown/unestablished.
+6. Map the report fields to one existing screen or agent response. If the developer chooses to integrate them into a test application, check that block references and unknowns survive rendering. Record what their current solution already handles better. An output review without integration is still useful feedback, but not an integration.
+7. Record setup time, code changes and failed steps. Sanitize artifacts before sharing.
+8. Stop after one test session. If the developer wants to keep a working integration, fix its largest obstacle next. If their current solution is sufficient, do not add speculative features. If installation or evidence fails, fix the observed failure before repeating that step.
 
-Success is an independently working useful integration, not a like, view count, positive comment or author-operated demo. Production adoption and willingness to pay remain separate questions.
+Track three separate outcomes: an independent run, a useful test integration, and continued use. A correct run alone shows reproducibility, not integration or adoption. Likes, views, positive comments and author-operated demos prove none of these. Production adoption and willingness to pay remain unproven.
 
-## Draft invitation — not sent
+## Ask the evaluator
 
-Hi — I built a read-only Aerodrome MCP with allocation comparisons and competing-vote stress tests. There's a synthetic stdio example and an inspection panel you can run without connecting a wallet. Would this help with any calculation or explanation you're currently maintaining yourself? If so, I'd like to test one small integration and learn where the setup gets in your way.
+- What is your recent **actual alternative** for checking a reward change — the tool or manual step you really used last time?
+- Where did **setup friction** appear (install, fixture, output format, explanation gap)?
+- What does your **current solution already do** well enough that this would not replace?
 
-Repository: https://github.com/Alubiama/aerodrome-mcp-base
+Choose a relevant recipient and context before any invitation. No partnership, deadline or feature commitment is implied. Share synthetic fixtures, not private decision cards or wallet history.
 
-Choose a relevant recipient and context before sending. No partnership, deadline or feature commitment is implied. Share synthetic fixtures, not private decision cards.
+## Later candidate — allocation inspection panel (not the first pilot)
+
+Preserved from the original proposal for a later, separate session. Embed one allocation inspection panel in an existing test application: run `example:stdio`, render the Equal split plus its three stress results (raw SYN subtotals 20, 16, 14, 10), and exercise the partial fixture so the UI shows incomplete coverage and known-entry subtotals, never a complete reward claim. Evaluate with the same evidence standard above: an independently working useful integration, adoption unproven.
