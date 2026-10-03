@@ -104,6 +104,37 @@ const pagedRt:BasketRuntime={...rt,fetch:(async(url:URL|string)=>{
 }) as typeof fetch};
 const paged=await readBasketInventory({wallet},signal,pagedRt);
 assert.equal(pages,2);assert.equal(paged.pagination.totalCandidates,42);
+// A later provider failure must not erase valid earlier pages or claim full coverage.
+let partialCalls=0;
+const partialRt:BasketRuntime={...rt,inventorySnapshots:new Map(),fetch:(async(url:URL|string)=>{
+ partialCalls++;const u=new URL(url);
+ if(u.pathname.endsWith('/token-balances'))return new Response('temporary',{status:503});
+ if(!u.searchParams.has('items_count'))return new Response(JSON.stringify({items:source.slice(0,20),next_page_params:{items_count:20}}));
+ return new Response('private upstream error',{status:503});
+}) as typeof fetch};
+const partial=await readBasketInventory({wallet},signal,partialRt);
+assert.equal(partial.discoveryStatus,'PARTIAL_CANDIDATES');
+assert.equal(partial.discoveryFailure?.code,'UPSTREAM');
+assert.ok(partial.pagination.totalCandidates>16);assert.equal(partial.rows.length,16);
+assert.ok(partial.warnings.some(x=>x.includes('incomplete')));
+assert.equal(JSON.stringify(partial).includes('private upstream error'),false);
+const partialNext=await readBasketInventory({wallet,offset:16,inventoryId:partial.pagination.inventoryId},signal,partialRt);
+assert.equal(partialCalls,3,'continuation reuses partial snapshot instead of requerying indexer');
+assert.equal(partialNext.discoveryStatus,'PARTIAL_CANDIDATES');
+assert.equal(partialNext.pagination.inventoryId,partial.pagination.inventoryId);
+assert.equal(partialNext.discoveryFailure?.code,'UPSTREAM');
+const refreshedPartial=await readBasketInventory({wallet,refreshDiscovery:true},signal,partialRt);
+await readBasketInventory({wallet,offset:16,inventoryId:refreshedPartial.pagination.inventoryId},signal,partialRt);
+assert.equal(partialCalls,6,'fresh partial results also store a continuation snapshot');
+const partialKeepAlive=setInterval(()=>{},1000);
+const lateTimeout=await readBasketInventory({wallet},signal,{...rt,discoveryTimeoutMs:5,fetch:((url:URL|string,init:any)=>{
+ const u=new URL(url);
+ if(u.pathname.endsWith('/token-balances'))return Promise.resolve(new Response('temporary',{status:503}));
+ if(!u.searchParams.has('items_count'))return Promise.resolve(new Response(JSON.stringify({items:source.slice(0,20),next_page_params:{items_count:20}})));
+ return new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true}));
+}) as typeof fetch}).finally(()=>clearInterval(partialKeepAlive));
+assert.equal(lateTimeout.discoveryStatus,'PARTIAL_CANDIDATES');assert.equal(lateTimeout.discoveryFailure?.code,'TIMEOUT');
+assert.ok(lateTimeout.pagination.totalCandidates>16);
 const incomplete=await readBasketInventory({wallet},signal,{...rt,fetch:(async(url:URL|string)=>new Response(String(url).includes('/token-balances')?'temporary':JSON.stringify({items:source.slice(0,1),next_page_params:{items_count:1}}),String(url).includes('/token-balances')?{status:503}:undefined)) as typeof fetch});
 assert.equal(incomplete.discoveryStatus,'UNAVAILABLE','an incomplete or cycling page sequence is never presented as full discovery');
 attempts=0;

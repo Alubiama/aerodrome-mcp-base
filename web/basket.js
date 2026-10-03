@@ -55,19 +55,19 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   const scope=filter==='all'?'All loaded tokens':filter==='u1'?'Under $1':'Under $5';
   const remaining=p.nextOffset===null?0:p.totalCandidates-p.nextOffset;
   const coverage=el('section','','coverage');coverage.setAttribute('aria-label','Token check progress');
-  coverage.append(el('strong',inventory.discoveryStatus==='UNAVAILABLE'?'Token discovery unavailable':`${inventory.rows.length} of ${p.totalCandidates} candidate contracts checked`));
+  coverage.append(el('strong',inventory.discoveryStatus==='UNAVAILABLE'?'Token discovery unavailable':inventory.discoveryStatus==='PARTIAL_CANDIDATES'?'Token discovery incomplete':`${inventory.rows.length} of ${p.totalCandidates} candidate contracts checked`));
   if(inventory.discoveryStatus!=='UNAVAILABLE'){
    const bar=el('progress');bar.value=inventory.rows.length;bar.max=Math.max(1,p.totalCandidates);bar.setAttribute('aria-label','Candidate contracts checked');coverage.append(bar);
   }
-  coverage.append(el('p',inventory.discoveryStatus==='UNAVAILABLE'?'Only the core contracts were checked. Other token balances are unknown.':remaining?`${remaining} candidate contracts still need an onchain balance check. A candidate is not necessarily a token you hold.`:'All discovered candidates have been checked for balances. This is not proof that every asset on Base was discovered.','meta'));
+  coverage.append(el('p',inventory.discoveryStatus==='UNAVAILABLE'?'Only the core contracts were checked. Other token balances are unknown.':inventory.discoveryStatus==='PARTIAL_CANDIDATES'?'Showing candidates from the pages that responded. More tokens may be missing; missing balances are unknown.':remaining?`${remaining} candidate contracts still need an onchain balance check. A candidate is not necessarily a token you hold.`:'All discovered candidates have been checked for balances. This is not proof that every asset on Base was discovered.','meta'));
   if(remaining){const next=el('button',busy?'Checking…':`Check next ${Math.min(16,remaining)} candidates`,'more next-page');next.type='button';next.disabled=busy;next.onclick=()=>load(true);coverage.append(next)}
   result.append(coverage);
   const note=el('p',`${scope}: ${normal.length} shown from ${inventory.rows.length} checked candidates. Filters apply only to checked candidates. ${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}`,'meta');note.setAttribute('role','status');result.append(note);
   result.append(el('p','Unknown token contracts require address review before selection. This unlocks read-only preview only; it does not mark a token safe.','risk-note'));
   if(!normal.length)result.append(el('p','No loaded tokens match this filter. Try All or load more.','meta'));
-  if(inventory.discoveryStatus==='UNAVAILABLE'){
+  if(inventory.discoveryStatus==='UNAVAILABLE'||inventory.discoveryStatus==='PARTIAL_CANDIDATES'){
    const reasons={RATE_LIMITED:'The token indexer is rate limited. Wait a minute before retrying.',TIMEOUT:'The token indexer did not respond in time.',UPSTREAM:'The token indexer returned an error.',INVALID_RESPONSE:'The token indexer response could not be verified.',NETWORK:'The token indexer could not be reached.'};
-   result.append(el('p',`${reasons[inventory.discoveryFailure?.code]||'Token discovery is unavailable.'} Only USDC and WETH were checked. Other balances are not known to be zero.`,'bad'));
+   result.append(el('p',`${reasons[inventory.discoveryFailure?.code]||'Token discovery is unavailable.'} ${inventory.discoveryStatus==='PARTIAL_CANDIDATES'?'Recovered candidates remain visible. The token list is incomplete.':'Only USDC and WETH were checked. Other balances are not known to be zero.'}`,'bad'));
    const retry=el('button',busy?'Checking…':'Retry discovery','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry,el('p','Retry keeps your selection where refreshed balances still allow it. You can also enter token contract addresses in Choose tokens manually.','meta'));
   }
   if(inventory.discoveryStatus==='CACHED_CANDIDATES'){

@@ -53,4 +53,9 @@ resolveA({ok:true,json:async()=>page(walletA,[row()])});await settle();assert.do
 queue.push(()=>({ok:false,json:async()=>({error:{message:'Provider failed'}})}));submit();await settle();assert.equal(result.textContent,'No inventory loaded.');assert.equal(error.textContent,'Provider failed');
 ids.get('w').value=walletA;queue.push(page(walletA,[{...row(),riskLevel:'KNOWN_CONTRACT'}]));submit();await settle();assert.equal(result.all().find(x=>x.attributes['aria-label']==='Select AERO').disabled,true,'only exact core addresses bypass review');
 queue.push(page(walletA,[{...row(),riskLevel:'BLOCKED_METADATA',suspectedSpam:true,spamReason:'Imitates USDC'}]));submit();await settle();assert.equal(result.all().find(x=>x.attributes['aria-label']==='Select AERO').disabled,true);assert.match(result.textContent,/Blocked metadata/);assert.equal(result.all().some(x=>x.attributes['aria-label']===`I checked contract ${token}`),false);
-assert.ok(requests.every(x=>['/api/basket/inventory','/api/basket/quote'].includes(x.url)));console.log('PASS UI flow: recovery with selection, unknown filters, fresh amounts, quote amount binding, pagination, stale wallet response and failed reload. No live wallet or network.');
+queue.push({...page(walletA,[row()], 'PARTIAL_CANDIDATES'),discoveryFailure:{code:'TIMEOUT'}});submit();await settle();
+assert.match(result.textContent,/Token discovery incomplete/);
+assert.match(result.textContent,/Recovered candidates remain visible/);
+assert.doesNotMatch(result.textContent,/Only USDC and WETH were checked|All discovered candidates have been checked/);
+assert.ok(result.all().find(x=>x.tag==='button'&&x.textContent==='Retry discovery'));
+assert.ok(requests.every(x=>['/api/basket/inventory','/api/basket/quote'].includes(x.url)));console.log('PASS UI flow: recovery with selection, partial discovery warning and retry, unknown filters, fresh amounts, quote amount binding, pagination, stale wallet response and failed reload. No live wallet or network.');
