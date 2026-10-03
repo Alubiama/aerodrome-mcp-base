@@ -128,7 +128,8 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
       const [filename, mime] = files[url.pathname];
       const content = await readFile(new URL(`../web/${filename}`, import.meta.url));
       const body = url.pathname === '/miniapp' ? Buffer.from(content.toString('utf8').replace('</html>', '<script type="module" src="/miniapp.js"></script></html>')) : content;
-      res.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }); res.end(req.method === "HEAD" ? undefined : body); return;
+      if (mime === 'image/png') res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+      res.writeHead(200, { "Content-Type": mime === 'image/png' ? mime : `${mime}; charset=utf-8` }); res.end(req.method === "HEAD" ? undefined : body); return;
     }
     error(res, 404, "NOT_FOUND", "Page not found.");
   }

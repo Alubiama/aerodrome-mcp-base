@@ -61,7 +61,10 @@ try {
   assert.equal(manifest.miniapp.version, '1');
   assert.equal(manifest.miniapp.noindex, true);
   assert.equal(manifest.accountAssociation, undefined);
-  assert.equal((await fetch(`${origin}/miniapp-icon.png`)).status, 200);
+  const icon = await fetch(`${origin}/miniapp-icon.png`);
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get('content-type'), 'image/png');
+  assert.match(icon.headers.get('cache-control') ?? '', /max-age=86400/);
   assert.equal((await fetch(`${origin}/miniapp-share.png`)).status, 200);
   const signedPayload = Buffer.from(JSON.stringify({domain:'collect-base.onrender.com'})).toString('base64url');
   assert.deepEqual(accountAssociationFromEnv({FARCASTER_HEADER:'header',FARCASTER_PAYLOAD:signedPayload,FARCASTER_SIGNATURE:'signature'},'collect-base.onrender.com'),{header:'header',payload:signedPayload,signature:'signature'});
