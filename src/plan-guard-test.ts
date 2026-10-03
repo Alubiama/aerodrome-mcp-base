@@ -16,6 +16,10 @@ const rt:any={allowQuotes:false,fetch:async()=>{throw Error('No network allowed'
 const run=()=>prepareBasketPlan(expected,new AbortController().signal,rt);
 let passed=0;
 for(const a of [0n,1n,1000000n])for(const h of [false,true]){allowance=a;twoHops=h;assert.equal(validateUnsignedPlan(await run(),expected),true);passed++;}
+const singleExpected={wallet,tokens:[tokens[0]],amounts:{[tokens[0]]:'1000'}};
+const single=await prepareBasketPlan(singleExpected,new AbortController().signal,rt);
+assert.equal(validateUnsignedPlan(single,singleExpected),true);passed++;
+assert.throws(()=>validateUnsignedPlan(single,{...singleExpected,amounts:{[tokens[0]]:'999'}}));passed++;
 allowance=1n;twoHops=false;const good=await run();
 const swapAbi=parseAbi(['function swapExactTokensForTokens(uint256,uint256,(address,address,bool,address)[],address,uint256)']);
 const swap=(p:any)=>p.calls.find((c:any)=>c.kind==='SWAP');

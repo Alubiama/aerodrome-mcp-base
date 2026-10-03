@@ -44,7 +44,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
  }
  function render(){
   if(!inventory)return;result.replaceChildren();const p=inventory.pagination;
-  const head=el('div','','head');head.append(el('b','Your tokens'),el('span',`${inventory.rows.length} checked / ${p.totalCandidates} candidates`,'meta'));result.append(head);
+  const head=el('div','','head');head.append(el('b','Your tokens'),el('span',`${inventory.rows.length} checked of ${p.totalCandidates} candidates`,'meta'));result.append(head);
   const matches=(x,value)=>!x.suspectedSpam&&(value==='all'||x.status!=='ZERO_BALANCE'&&(x.approximateUsd==null||x.approximateUsd<(value==='u1'?1:5)));
   const filters=el('div','','filters');filters.setAttribute('aria-label','Filter loaded tokens');
   for(const [value,label] of [['all','All'],['u1','Under $1'],['u5','Under $5']]){
@@ -54,9 +54,16 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   const normal=inventory.rows.filter(x=>matches(x,filter)),review=inventory.rows.filter(x=>riskLevel(x)==='BLOCKED_METADATA'),unknown=normal.filter(x=>x.approximateUsd==null).length;
   const scope=filter==='all'?'All loaded tokens':filter==='u1'?'Under $1':'Under $5';
   const remaining=p.nextOffset===null?0:p.totalCandidates-p.nextOffset;
-  const note=el('p',`${scope}: ${normal.length} shown of ${inventory.rows.length} checked. ${remaining?`${remaining} candidate contracts still unchecked. Filters apply only to checked tokens. `:'All candidate contracts checked. '}${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}`,'meta');note.setAttribute('role','status');result.append(note);
+  const coverage=el('section','','coverage');coverage.setAttribute('aria-label','Token check progress');
+  coverage.append(el('strong',inventory.discoveryStatus==='UNAVAILABLE'?'Token discovery unavailable':`${inventory.rows.length} of ${p.totalCandidates} candidate contracts checked`));
+  if(inventory.discoveryStatus!=='UNAVAILABLE'){
+   const bar=el('progress');bar.value=inventory.rows.length;bar.max=Math.max(1,p.totalCandidates);bar.setAttribute('aria-label','Candidate contracts checked');coverage.append(bar);
+  }
+  coverage.append(el('p',inventory.discoveryStatus==='UNAVAILABLE'?'Only the core contracts were checked. Other token balances are unknown.':remaining?`${remaining} candidate contracts still need an onchain balance check. A candidate is not necessarily a token you hold.`:'All discovered candidates have been checked for balances. This is not proof that every asset on Base was discovered.','meta'));
+  if(remaining){const next=el('button',busy?'Checking…':`Check next ${Math.min(16,remaining)} candidates`,'more next-page');next.type='button';next.disabled=busy;next.onclick=()=>load(true);coverage.append(next)}
+  result.append(coverage);
+  const note=el('p',`${scope}: ${normal.length} shown from ${inventory.rows.length} checked candidates. Filters apply only to checked candidates. ${unknown?`${unknown} have unknown value and remain visible. `:''}${filter!=='all'?'Zero balances excluded. ':''}`,'meta');note.setAttribute('role','status');result.append(note);
   result.append(el('p','Unknown token contracts require address review before selection. This unlocks read-only preview only; it does not mark a token safe.','risk-note'));
-  if(remaining){const next=el('button',busy?'Checking…':`Check next ${Math.min(16,remaining)} token contracts`,'more next-page');next.type='button';next.disabled=busy;next.onclick=()=>load(true);result.append(next)}
   if(!normal.length)result.append(el('p','No loaded tokens match this filter. Try All or load more.','meta'));
   if(inventory.discoveryStatus==='UNAVAILABLE'){
    const reasons={RATE_LIMITED:'The token indexer is rate limited. Wait a minute before retrying.',TIMEOUT:'The token indexer did not respond in time.',UPSTREAM:'The token indexer returned an error.',INVALID_RESPONSE:'The token indexer response could not be verified.',NETWORK:'The token indexer could not be reached.'};
@@ -67,11 +74,17 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    result.append(el('p',inventory.discoveryFailure?'The token indexer did not refresh. Showing a recent token list; balances were checked again on Base.':'Showing a recent token list; balances were checked again on Base.','meta'));
    const retry=el('button',busy?'Checking…':'Refresh token list','more');retry.type='button';retry.disabled=busy;retry.onclick=()=>load(false,true);result.append(retry);
   }
-  const list=el('div','','tokens');normal.forEach(x=>list.append(tokenRow(x)));result.append(list);
+  const list=el('div','','tokens');
+  const observed=normal.filter(x=>x.status==='OBSERVED'),empty=normal.filter(x=>x.status==='ZERO_BALANCE'),unresolved=normal.filter(x=>x.status!=='OBSERVED'&&x.status!=='ZERO_BALANCE');
+  for(const [title,description,rows] of [
+   ['Balance observed · route and costs unknown','Onchain balance found. Indexer prices are not sale quotes, and these tokens have not been assessed for net return.',observed],
+   ['Balance could not be checked','A failed read is not a zero balance. Try again later before making a decision.',unresolved],
+   ['No balance at the checked block','These contracts had a zero balance when checked. A later balance can change.',empty]
+  ])if(rows.length){const group=el('section','','inventory-group');group.append(el('h3',`${title} (${rows.length})`),el('p',description,'meta'));rows.forEach(x=>group.append(tokenRow(x)));list.append(group)}
+  result.append(list);
   if(review.length){const d=el('details','','review');d.append(el('summary',`Blocked metadata (${review.length})`),el('p','Promotional instructions or imitation of a known Base token. These contracts cannot be selected here. This is a heuristic, not a complete scam check.','meta'));review.forEach(x=>d.append(tokenRow(x)));result.append(d)}
   result.append(el('p','Quotes via Aerodrome · classic pools only','meta'));const controls=el('div','','controls'),out=el('select');out.setAttribute('aria-label','Output asset');for(const name of ['USDC','ETH']){const o=el('option',name);o.value=name;out.append(o)}out.value=destination;out.onchange=()=>{invalidate();destination=out.value;render()};
   const preview=el('button',busy?'Checking…':'Preview','preview');preview.disabled=busy||!selected.size;preview.onclick=quote;controls.append(el('span',`${selected.size} selected`,'meta'),out,preview);result.append(controls);
-  if(p.nextOffset!==null){const more=el('button',busy?'Loading…':'Load more','more');more.disabled=busy;more.onclick=()=>load(true);result.append(more)}
   const details=el('details');details.append(el('summary','Coverage and estimates'));(inventory.warnings||[]).forEach(x=>details.append(el('p',x,'meta')));result.append(details);
   const inventoryMain=el('div','','inventory-main'),panel=el('aside','','collection');panel.setAttribute('aria-label','Your collection');
   [...result.children].forEach(child=>inventoryMain.append(child));
@@ -79,13 +92,14 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   panel.append(el('p','YOUR COLLECTION','eyebrow'),el('div',`${selected.size} token${selected.size===1?'':'s'} selected`,'meta'),el('p',known.length<chosen.length?'Known selected value':'Estimated selected value','meta'),el('div',selected.size?(known.length?(sum>0&&sum<.01?'~<$0.01':'~$'+sum.toLocaleString('en-US',{maximumFractionDigits:2})):'Unknown'):'$0.00','collection-total'));
   if(known.length<chosen.length)panel.append(el('p',`${chosen.length-known.length} selected token(s) have unknown value.`,'meta'));
   panel.append(el('p','Route · Aerodrome','route-label'),el('p','Classic pools only · before gas','meta'),controls,el('p','Review only. No approvals or swaps are sent.','meta'));
-  const canCheck=destination==='USDC'&&selected.size>=2&&selected.size<=5&&!selected.has(USDC);
-  const simulate=el('button',busy?'Checking…':'Simulate sequence','prepare');simulate.disabled=busy||!canCheck;simulate.onclick=()=>plan(true);
-  const prepare=el('button',busy?'Checking…':'Prepare plan','prepare');prepare.disabled=busy||!canCheck;prepare.onclick=()=>plan(false);
-  const compare=el('button',busy?'Comparing…':'Compare what to include','prepare');compare.disabled=busy||!canCheck;compare.onclick=compareSelection;
-  const advanced=el('details','','advanced-actions');advanced.append(el('summary','Advanced route checks'),prepare,simulate);
-  panel.append(compare,advanced,el('p','Comparison tests the full set and each one-token omission.','meta'));
-  if(!canCheck)panel.append(el('p','Compare and advanced checks require 2–5 input tokens with USDC as the output asset. Preview works for a single token too.','meta'));
+  const canEstimate=destination==='USDC'&&selected.size>=1&&selected.size<=5&&!selected.has(USDC),canCompare=canEstimate&&selected.size>=2;
+  const simulate=el('button',busy?'Checking…':'Estimate after fees','prepare');simulate.disabled=busy||!canEstimate;simulate.onclick=()=>plan(true);
+  const prepare=el('button',busy?'Checking…':'Inspect unsigned plan','prepare');prepare.disabled=busy||!canEstimate;prepare.onclick=()=>plan(false);
+  const compare=el('button',busy?'Comparing…':'Compare what to include','prepare');compare.disabled=busy||!canCompare;compare.onclick=compareSelection;
+  const advanced=el('details','','advanced-actions');advanced.append(el('summary','Advanced route checks'),prepare);
+  panel.append(simulate,el('p','Read-only sequence simulation and network-fee estimate. If any step fails, the result is unknown.','meta'),compare,advanced,el('p','Comparison tests the full set and each one-token omission.','meta'));
+  if(!canEstimate)panel.append(el('p','Estimate after fees requires 1–5 input tokens with USDC as output. Preview also works for ETH.','meta'));
+  else if(!canCompare)panel.append(el('p','Compare what to include requires 2–5 input tokens.','meta'));
   if(destination==='USDC'&&selected.has(USDC))panel.append(el('p','USDC is already the output asset. Deselect it to compare or simulate.','meta'));
   result.append(inventoryMain,panel);
  }

@@ -13,7 +13,7 @@ const addrWord=a=>address(a).slice(2).padStart(64,'0');
 
 export function validateUnsignedPlan(plan,expected,now=Date.now()){
  const wallet=address(expected.wallet),tokens=expected.tokens.map(address);
- check(tokens.length>=2&&tokens.length<=5&&new Set(tokens).size===tokens.length&&!tokens.includes(USDC));
+ check(tokens.length>=1&&tokens.length<=5&&new Set(tokens).size===tokens.length&&!tokens.includes(USDC));
  check(expected.amounts&&Object.keys(expected.amounts).length===tokens.length&&Object.keys(expected.amounts).every(t=>tokens.includes(t)));
  check(plan&&address(plan.wallet)===wallet&&plan.chainId===8453&&plan.destination==='USDC'&&plan.provider==='AERODROME');
  check(plan.executable===false&&plan.executionMode==='REQUIRES_ATOMIC_WALLET_BATCH'&&plan.simulation?.status==='NOT_SIMULATED'&&plan.slippageBps===50);
@@ -47,7 +47,7 @@ const CODE_HASH='0xa11d1a13950f5b70dd0d7822e4e3b575778d8614e897c7810d7e6e9f310c0
 const bytes=value=>word(BigInt(value.length/2))+value.padEnd(Math.ceil(value.length/64)*64,'0');
 export function validateUniversalPlan(plan,expected,now=Date.now()){
  check(plan?.executionMode==='APPROVALS_THEN_UNIVERSAL_SWAP'&&address(plan.router)===UNIVERSAL&&plan.routerCodeHash===CODE_HASH);
- check(Array.isArray(plan.tokens)&&plan.tokens.length>=2&&plan.tokens.length<=5&&Array.isArray(plan.calls)&&plan.calls.length<=11);
+ check(Array.isArray(plan.tokens)&&plan.tokens.length>=1&&plan.tokens.length<=5&&Array.isArray(plan.calls)&&plan.calls.length<=11);
  const wallet=address(expected.wallet),deadline=Date.parse(plan.expiresAt)/1000;
  check(Number.isSafeInteger(deadline));
  let cursor=0;const legacyCalls=[],inputs=[];

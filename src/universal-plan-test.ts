@@ -19,6 +19,10 @@ const rt:any={allowQuotes:false,fetch:async()=>{throw Error('No network allowed'
 const run=()=>prepareUniversalBasketPlan(expected,new AbortController().signal,rt);
 let passed=0;
 for(const a of [0n,1n,1000000n])for(const h of [false,true]){allowance=a;twoHops=h;const p=await run();assert.equal(validateUniversalPlan(p,expected),true);assert.equal(p.calls.filter(c=>c.kind==='UNIVERSAL_SWAP').length,1);assert.equal(p.calls.at(-1).kind,'UNIVERSAL_SWAP');passed++;}
+const singleExpected={wallet,tokens:[tokens[0]],amounts:{[tokens[0]]:'1000'}};
+const single=await prepareUniversalBasketPlan(singleExpected,new AbortController().signal,rt);
+assert.equal(validateUniversalPlan(single,singleExpected),true);passed++;
+const alteredSingle=structuredClone(single);alteredSingle.calls.at(-1).data+='00';assert.throws(()=>validateUniversalPlan(alteredSingle,singleExpected));passed++;
 allowance=1n;twoHops=false;const good=await run();
 const mutateArgs=(p:any,fn:(args:any[])=>void)=>{const c=p.calls.at(-1);const decoded=decodeFunctionData({abi:universalAbi,data:c.data});const args:any[]=[...structuredClone(decoded.args!)];fn(args);c.data=encodeFunctionData({abi:universalAbi,functionName:'execute',args:args as any});};
 const params=parseAbiParameters('address,uint256,uint256,bytes,bool,bool');
