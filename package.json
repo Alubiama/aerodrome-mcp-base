@@ -9,18 +9,20 @@
     "node": ">=24"
   },
   "scripts": {
-    "web": "node --import tsx src/web-server.ts",
-    "test:web": "node --import tsx src/web-server-test.ts && node web/comparison-choice-test.mjs && node web/basket-flow-test.mjs",
+    "web": "npm run build:miniapp && node --import tsx src/web-server.ts",
+    "test:web": "npm run build:miniapp && node --import tsx src/web-server-test.ts && node web/comparison-choice-test.mjs && node web/basket-flow-test.mjs",
     "test:basket": "node --import tsx src/basket-test.ts",
     "start": "node --import tsx src/mcp/index.ts",
     "test": "node --import tsx src/mcp-test.ts && node --import tsx src/pools-test.ts && node --import tsx src/incentives-test.ts && node --import tsx src/assets-test.ts && node --import tsx src/pinned-read-cache-test.ts && node --import tsx src/token-market-test.ts && node --import tsx src/reward-plan-test.ts && node --import tsx src/config-path-test.ts",
     "typecheck": "tsc --noEmit",
     "demo": "node --import tsx src/demo.ts",
-    "build": "tsc",
+    "build": "tsc && npm run build:miniapp",
+    "build:miniapp": "esbuild web/miniapp-entry.js --bundle --format=esm --platform=browser --target=es2020 --minify --outfile=web/miniapp.js",
     "test:wallet": "node --import tsx src/wallet-test.ts && node --import tsx src/basket-plan-test.ts && node --import tsx src/basket-simulation-test.ts && node --import tsx src/basket-value-test.ts && node --import tsx src/basket-compare-test.ts",
     "test:security": "node --import tsx src/request-admission-test.ts && node --import tsx src/plan-guard-test.ts && node --import tsx src/universal-plan-test.ts"
   },
   "dependencies": {
+    "@farcaster/miniapp-sdk": "^0.3.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "viem": "^2.37.0",
     "zod": "^4.6.1"
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.20.0",
     "typescript": "^5.6.0"
   },
