@@ -8,6 +8,18 @@ import {sampledSelectionChoice} from './comparison-choice.js';
  let inventory=null, selected=new Set(), reviewed=new Set(), kept=new Set(), filter='all', destination='USDC', controller, sequence=0, expiry, busy=false;
  const address=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x)&&!/^0x0{40}$/i.test(x);
  const same=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase();
+ function checkRouteResponse(response){
+  if(response.ok)return;
+  // Show fixed, actionable messages; never expose an upstream error body.
+  if(response.status===429)throw Error('Too many checks at once. Wait a minute, then try again. Your selection is kept.');
+  if(response.status===504)throw Error('The route check timed out. Try again or select fewer tokens. No transaction was sent.');
+  if(response.status===502||response.status===503)throw Error('The route could not be verified right now. Try again. No transaction was sent.');
+  throw Error('The route request was rejected. Check the selected amounts and request a fresh preview.');
+ }
+ async function routeJson(response){
+  checkRouteResponse(response);
+  try{return await response.json()}catch{throw Error('The route response could not be read. Request a fresh preview.');}
+ }
  const el=(tag,text='',cls='')=>{const n=document.createElement(tag);n.textContent=text;n.className=cls;return n};
  const manualTokens=()=>manual.value.split(/[\s,]+/).filter(Boolean);
  const storageKey=()=>`aero-basket-kept:${wallet.value.trim().toLowerCase()}:8453`;
@@ -125,8 +137,8 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   let limits;try{limits=selectedAmounts()}catch(e){error.textContent=e.message;return}
   invalidate();const n=sequence,w=inventory.wallet,tokens=[...selected],output=destination;controller=new AbortController();busy=true;error.textContent='';render();
   try{
-   const response=await fetch('/api/basket/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits,destination:output,provider:'AERODROME'}),signal:controller.signal}),data=await response.json();if(n!==sequence)return;const b=data.binding,expires=Date.parse(b?.expiresAt);
-   if(!response.ok||!same(data.wallet,w)||data.destination!==output||data.provider!=='AERODROME'||!Array.isArray(data.rows)||data.rows.length!==tokens.length||new Set(data.rows.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.rows.every(x=>tokens.some(t=>same(t,x.token))&&(x.amountRaw===limits[x.token.toLowerCase()]||['READ_FAILED','ZERO_BALANCE'].includes(x.status)))||!b||!(/^[a-f0-9]{64}$/).test(b.basketKey)||b.executable!==false||b.expired||!Number.isFinite(expires)||expires<=Date.now())throw Error('Quote unavailable. Request a fresh preview.');
+   const response=await fetch('/api/basket/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits,destination:output,provider:'AERODROME'}),signal:controller.signal}),data=await routeJson(response);if(n!==sequence)return;const b=data.binding,expires=Date.parse(b?.expiresAt);
+   if(!same(data.wallet,w)||data.destination!==output||data.provider!=='AERODROME'||!Array.isArray(data.rows)||data.rows.length!==tokens.length||new Set(data.rows.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.rows.every(x=>tokens.some(t=>same(t,x.token))&&(x.amountRaw===limits[x.token.toLowerCase()]||['READ_FAILED','ZERO_BALANCE'].includes(x.status)))||!b||!(/^[a-f0-9]{64}$/).test(b.basketKey)||b.executable!==false||b.expired||!Number.isFinite(expires)||expires<=Date.now())throw Error('Quote unavailable. Request a fresh preview.');
    busy=false;render();const box=el('section','','quote'),paused=data.rows.some(x=>x.status==='PROVIDER_APPROVAL_REQUIRED');box.append(el('b',paused?'Route preview paused':data.totalOutputFormatted===null?'Quote unavailable':`${short(data.totalOutputFormatted)} ${output}`),el('p',paused?'Permission to share selected tokens and amounts with KyberSwap is pending. No route request was sent.':'Aerodrome classic pools · before gas. Limited route coverage; execution not simulated.','meta'));
    const routes=el('div','','quote-rows');
    for(const row of data.rows){const route=el('div','','quote-row');const status=row.status==='INDICATIVE_QUOTE'?`${short(row.outputFormatted)} ${output}`:row.status==='ALREADY_DESTINATION'?'Already in output asset':row.status==='QUOTE_UNAVAILABLE'?'Route unavailable':row.status==='NO_POSITIVE_QUOTE'?'No positive output':row.status==='ZERO_BALANCE'?'No balance':row.status==='PROVIDER_APPROVAL_REQUIRED'?'Permission required':'Could not verify';route.append(el('b',row.symbol||row.token),el('span',status));const detail=el('details');detail.append(el('summary','Route details'),el('p',row.token,'meta'),el('p',row.reason,'meta'));route.append(detail);routes.append(route)}box.append(routes);
@@ -137,7 +149,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   let limits;try{limits=selectedAmounts()}catch(e){error.textContent=e.message;return}
   invalidate();const n=sequence,w=inventory.wallet,tokens=[...selected];controller=new AbortController();busy=true;error.textContent='';render();
   try{
-   const response=await fetch(simulate?'/api/basket/simulate':'/api/basket/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits}),signal:controller.signal}),data=await response.json();if(n!==sequence)return;
+   const response=await fetch(simulate?'/api/basket/simulate':'/api/basket/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wallet:w,tokens,amounts:limits}),signal:controller.signal}),data=await routeJson(response);if(n!==sequence)return;
    const expires=Date.parse(data.expiresAt);
    if(!response.ok||!same(data.wallet,w)||data.chainId!==8453||data.destination!=='USDC'||data.provider!=='AERODROME'||data.executable!==false||data.simulation?.status!=='NOT_SIMULATED'||!Array.isArray(data.tokens)||data.tokens.length!==tokens.length||new Set(data.tokens.map(x=>x.token?.toLowerCase())).size!==tokens.length||!data.tokens.every(x=>tokens.some(t=>same(t,x.token))&&x.amountRaw===limits[x.token.toLowerCase()])||!Array.isArray(data.calls)||!Number.isFinite(expires)||expires<=Date.now())throw Error('Plan unavailable. Every input needs a fresh positive route to USDC.');
    validateUniversalPlan(data,{wallet:w,tokens,amounts:limits});

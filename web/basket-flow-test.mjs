@@ -40,6 +40,15 @@ find('button','Under $1 (1)').onclick();assert.match(result.textContent,/unknown
 // A new load must discard prior amounts, not silently reuse the edited value.
 queue.push(page(walletA,[row()]));submit();await settle();select('AERO',token);assert.equal(amount().value,'2');
 const quoted=amountRaw=>({wallet:walletA,destination:'USDC',provider:'AERODROME',rows:[{...row(),amountRaw,status:'INDICATIVE_QUOTE',outputFormatted:'1'}],totalOutputFormatted:'1',binding:{basketKey:'b'.repeat(64),executable:false,expired:false,expiresAt:new Date(Date.now()+30000).toISOString()}});
+for(const [status,message] of [[429,/Wait a minute/],[504,/timed out/],[502,/could not be verified right now/]]){
+ queue.push(()=>({ok:false,status,json:async()=>{throw Error('PRIVATE_UPSTREAM_DETAILS')}}));
+ await find('button','Preview').onclick();
+ assert.match(error.textContent,message);assert.doesNotMatch(error.textContent,/PRIVATE_UPSTREAM_DETAILS/);
+ assert.equal(result.querySelector('.quote'),null);assert.match(result.textContent,/1 token selected/);
+ assert.equal(find('button','Preview').disabled,false,'retry remains available after failure');
+}
+queue.push(()=>({ok:true,json:async()=>{throw Error('PRIVATE_INVALID_JSON')}}));
+await find('button','Preview').onclick();assert.match(error.textContent,/response could not be read/);assert.doesNotMatch(error.textContent,/PRIVATE_INVALID_JSON/);
 queue.push(quoted('1000000'));await find('button','Preview').onclick();assert.match(error.textContent,/Quote unavailable/);assert.equal(result.querySelector('.quote'),null);
 queue.push(quoted('2000000'));await find('button','Preview').onclick();assert.match(result.querySelector('.quote').textContent,/1 USDC/);
 // Pagination preserves the current selection and checks the next offset.
