@@ -36,7 +36,7 @@ const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 ids.get('w').value=walletA;queue.push(page(walletA,[row()], 'UNAVAILABLE'));submit();
 assert.equal(ids.get('view-wallet').disabled,true);assert.equal(ids.get('view-wallet').textContent,'Loading…');assert.match(ids.get('wallet-load-status').textContent,/Checking Base balances/);
 await settle();
-assert.equal(ids.get('view-wallet').disabled,false);assert.match(ids.get('wallet-load-status').textContent,/Discovery is incomplete/);assert.equal(result.scrollCount,1);
+assert.equal(ids.get('view-wallet').disabled,false);assert.match(ids.get('wallet-load-status').textContent,/Discovery is incomplete/);assert.equal(result.querySelector('.inventory-main').scrollCount,1);
 assert.match(result.textContent,/rate limited/);assert.match(result.textContent,/Token discovery unavailable/);assert.doesNotMatch(result.textContent,/All discovered candidates have been checked/);select('AERO',token);assert.equal(find('button','Estimate after fees').disabled,false,'a single selected token can get a read-only after-fee estimate');assert.equal(find('button','Compare what to include').disabled,true,'comparison still requires two inputs');amount().value='1';amount().oninput();
 queue.push(page(walletA,[row(),row(token2,4)]));await find('button','Retry discovery').onclick();
 assert.match(result.textContent,/1 token selected/);assert.equal(amount().value,'1');
