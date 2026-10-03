@@ -3,6 +3,7 @@ import {WalletSession,discoverWallets,rawAmount} from './wallet.js';
 import {sampledSelectionChoice} from './comparison-choice.js';
 (() => {
  const $=s=>document.querySelector(s), wallet=$('#w'), manual=$('#m'), result=$('#r'), error=$('#e');
+ const loadButton=$('#view-wallet'),loadStatus=$('#wallet-load-status');
  const WETH='0x4200000000000000000000000000000000000006',USDC='0x833589fcD6eDb6e08f4c7c32d4f71b54bdA02913'.toLowerCase();
  let amounts=new Map();
  let inventory=null, selected=new Set(), reviewed=new Set(), kept=new Set(), filter='all', destination='USDC', controller, sequence=0, expiry, busy=false;
@@ -34,7 +35,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
  function short(value){if(typeof value!=='string'||!/^[-]?\d+(\.\d+)?$/.test(value))return 'Unknown';const sign=value.startsWith('-')?'-':'';const [a,b='']=value.replace(/^-/,'').split('.');const tail=b.slice(0,6).replace(/0+$/,'');if(a==='0'&&!tail&&/[1-9]/.test(b))return sign+'<0.000001';return sign+a+(tail?'.'+tail:'')}
  const riskLevel=row=>row.riskLevel==='BLOCKED_METADATA'||row.suspectedSpam?'BLOCKED_METADATA':row.riskLevel==='KNOWN_CONTRACT'&&(same(row.token,USDC)||same(row.token,WETH))?'KNOWN_CONTRACT':'UNVERIFIED';
  function eligible(row){try{return riskLevel(row)!=='BLOCKED_METADATA'&&(riskLevel(row)==='KNOWN_CONTRACT'||reviewed.has(row.token.toLowerCase()))&&address(row.token)&&row.status==='OBSERVED'&&row.amountRaw!==null&&BigInt(row.amountRaw)>0n&&Number.isInteger(row.decimals)&&row.decimals>=0&&row.decimals<=36&&!kept.has(row.token.toLowerCase())}catch{return false}}
- function invalidate(){error.textContent='';controller?.abort();sequence++;clearTimeout(expiry);result.querySelector('.quote')?.remove();busy=false}
+ function invalidate(){error.textContent='';controller?.abort();sequence++;clearTimeout(expiry);result.querySelector('.quote')?.remove();busy=false;loadButton.disabled=false;loadButton.textContent='View wallet ↗';loadStatus.textContent=''}
  function reset(){invalidate();inventory=null;selected.clear();reviewed.clear();amounts.clear();$('#mc').textContent=`${manualTokens().length} / 16`;result.textContent='Load a wallet to view available tokens.'}
  function showValue(row){return row.approximateUsd==null?'Value unknown':row.approximateUsd>0&&row.approximateUsd<0.01?'~<$0.01':`~$${row.approximateUsd.toLocaleString('en-US',{maximumFractionDigits:2})}`}
  function tokenRow(row){
@@ -120,6 +121,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
   if(more&&(!inventory||inventory.pagination.nextOffset===null)){error.textContent='Load a wallet before requesting another page.';return}
   const preserve=retry&&inventory&&same(inventory.wallet,w)&&!ts.length;
   invalidate();const n=sequence;controller=new AbortController();busy=true;error.textContent='';
+  loadButton.disabled=true;loadButton.textContent='Loading…';loadStatus.textContent='Checking Base balances. Please wait.';
   if(!more&&!preserve){inventory=null;selected.clear();reviewed.clear();amounts.clear();readKept();result.textContent='Loading balances…'}else render();
   const offset=more?inventory.pagination.nextOffset:0,oldId=more?inventory.pagination.inventoryId:null;
   try{
@@ -129,8 +131,10 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    if(!same(data.wallet,w)||!Array.isArray(data.rows)||data.rows.length>16||!p||p.offset!==offset||!Number.isInteger(p.totalCandidates)||!(/^[a-f0-9]{64}$/).test(p.inventoryId)||more&&oldId!==p.inventoryId||p.nextOffset!==null&&p.nextOffset!==offset+data.rows.length||data.rows.some(x=>!address(x.token))||new Set(data.rows.map(x=>x.token.toLowerCase())).size!==data.rows.length)throw Error('Inventory mismatch. Reload from the first page.');
    const rows=new Map((more?inventory.rows:[]).map(x=>[x.token.toLowerCase(),x]));data.rows.forEach(x=>rows.set(x.token.toLowerCase(),x));inventory={...data,rows:[...rows.values()]};
    if(preserve){for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));if(!row||!eligible(row)){selected.delete(token);amounts.delete(token);continue}try{if(BigInt(rawAmount(amounts.get(token)||'',row.decimals))>BigInt(row.amountRaw))amounts.set(token,'')}catch{amounts.set(token,'')}}}
-   busy=false;render();
-  }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;if(inventory)render();else result.textContent='No inventory loaded.'}
+   busy=false;render();loadStatus.textContent=`${inventory.rows.length} of ${p.totalCandidates} candidate contracts checked. Results below.${inventory.discoveryStatus==='UNAVAILABLE'||inventory.discoveryStatus==='PARTIAL_CANDIDATES'?' Discovery is incomplete.':''}`;
+   if(!more&&!retry)result.scrollIntoView({behavior:'auto',block:'start'});
+  }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;loadStatus.textContent='Could not finish loading. See the message below and try again.';if(inventory)render();else result.textContent='No inventory loaded.'}
+  finally{if(n===sequence){loadButton.disabled=false;loadButton.textContent='View wallet ↗'}}
  }
  function selectedAmounts(){const out={};for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));if(!row||!eligible(row))throw Error('A selected token needs a fresh contract review. Reload the wallet.');const raw=rawAmount(amounts.get(token)||'',row.decimals);if(BigInt(raw)>BigInt(row.amountRaw))throw Error(`Amount exceeds ${row.symbol||'token'} balance.`);out[token]=raw}return out}
  async function quote(){
