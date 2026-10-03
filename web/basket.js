@@ -132,7 +132,7 @@ import {sampledSelectionChoice} from './comparison-choice.js';
    const rows=new Map((more?inventory.rows:[]).map(x=>[x.token.toLowerCase(),x]));data.rows.forEach(x=>rows.set(x.token.toLowerCase(),x));inventory={...data,rows:[...rows.values()]};
    if(preserve){for(const token of selected){const row=inventory.rows.find(x=>same(x.token,token));if(!row||!eligible(row)){selected.delete(token);amounts.delete(token);continue}try{if(BigInt(rawAmount(amounts.get(token)||'',row.decimals))>BigInt(row.amountRaw))amounts.set(token,'')}catch{amounts.set(token,'')}}}
    busy=false;render();loadStatus.textContent=`${inventory.rows.length} of ${p.totalCandidates} candidate contracts checked. Results below.${inventory.discoveryStatus==='UNAVAILABLE'||inventory.discoveryStatus==='PARTIAL_CANDIDATES'?' Discovery is incomplete.':''}`;
-   if(!more&&!retry)result.scrollIntoView({behavior:'auto',block:'start'});
+   if(!more&&!retry)(result.querySelector('.inventory-main')||result).scrollIntoView({behavior:'auto',block:'start'});
   }catch(e){if(n!==sequence)return;busy=false;if(e.name!=='AbortError')error.textContent=e.message;loadStatus.textContent='Could not finish loading. See the message below and try again.';if(inventory)render();else result.textContent='No inventory loaded.'}
   finally{if(n===sequence){loadButton.disabled=false;loadButton.textContent='View wallet ↗'}}
  }
