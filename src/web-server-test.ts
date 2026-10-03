@@ -4,6 +4,7 @@ import { request } from "node:http";
 import { createOverviewWebServer } from "./web-server.js";
 import { overviewFixture } from "./overview-fixture.js";
 import { getWalletOverview } from "./mcp/overview.js";
+import { accountAssociationFromEnv } from './miniapp-manifest.js';
 
 let reads = 0;
 let mode = "normal";
@@ -44,6 +45,27 @@ try {
   assert.equal((await post({ wallet: "a".repeat(1100) })).status, 413);
   assert.equal((await fetch(`${origin}/config.json`)).status, 404);
   assert.equal((await fetch(`${origin}/basket`)).status, 200);
+  const basketPage = await (await fetch(`${origin}/basket`)).text();
+  assert.match(basketPage, /name="fc:miniapp"/);
+  const miniapp = await new Promise<{status:number; csp:string; body:string}>(resolve => {
+    const req = request(`${origin}/miniapp`, {headers:{'sec-fetch-site':'cross-site','sec-fetch-mode':'navigate'}}, res => {
+      let body='';res.on('data', chunk => {body+=chunk.toString();});res.on('end',()=>resolve({status:res.statusCode??0,csp:String(res.headers['content-security-policy']??''),body}));
+    });req.end();
+  });
+  assert.equal(miniapp.status, 200);
+  assert.match(miniapp.csp, /frame-ancestors https:\/\/farcaster\.xyz/);
+  assert.match(miniapp.body, /src="\/miniapp\.js"/);
+  assert.equal((await fetch(`${origin}/miniapp`, { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+  assert.match((await fetch(`${origin}/basket`)).headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
+  const manifest = await (await fetch(`${origin}/.well-known/farcaster.json`)).json();
+  assert.equal(manifest.miniapp.version, '1');
+  assert.equal(manifest.miniapp.noindex, true);
+  assert.equal(manifest.accountAssociation, undefined);
+  assert.equal((await fetch(`${origin}/miniapp-icon.png`)).status, 200);
+  assert.equal((await fetch(`${origin}/miniapp-share.png`)).status, 200);
+  const signedPayload = Buffer.from(JSON.stringify({domain:'collect-base.onrender.com'})).toString('base64url');
+  assert.deepEqual(accountAssociationFromEnv({FARCASTER_HEADER:'header',FARCASTER_PAYLOAD:signedPayload,FARCASTER_SIGNATURE:'signature'},'collect-base.onrender.com'),{header:'header',payload:signedPayload,signature:'signature'});
+  assert.throws(()=>accountAssociationFromEnv({FARCASTER_HEADER:'header',FARCASTER_PAYLOAD:signedPayload,FARCASTER_SIGNATURE:'signature'},'other.example'));
   assert.equal((await fetch(`${origin}/basket`,{method:"HEAD"})).status,200);
   assert.equal((await fetch(`${origin}/wallet.js`)).status,200);
   assert.equal((await fetch(`${origin}/plan-guard.js`)).status,200);

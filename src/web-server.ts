@@ -12,6 +12,7 @@ import { makeClient } from "./client.js";
 import { getWalletOverview, walletOverviewInputSchema, walletOverviewSchema, type WalletOverviewInput } from "./mcp/overview.js";
 import { overviewFixture } from "./overview-fixture.js";
 import { readBasketInventory, quoteBasket, inventoryInput, basketQuoteInput, InventoryChangedError } from './basket.js';
+import { accountAssociationFromEnv, miniappManifest } from './miniapp-manifest.js';
 
 export function validatePublicOrigin(value:string){
  const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw Error('Use a public HTTPS origin without credentials, path or query.');return url.origin;
@@ -44,15 +45,23 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'none'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    const miniappLaunch = req.url?.split('?')[0] === '/miniapp';
+    const frameAncestors = miniappLaunch ? "https://farcaster.xyz https://*.farcaster.xyz https://base.app https://*.base.app" : "'none'";
+    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'none'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors ${frameAncestors}`);
     const port = (server.address() as { port?: number } | null)?.port;
     const allowedHosts = publicOrigin?[new URL(publicOrigin).host]:[`127.0.0.1:${port}`, `localhost:${port}`];
     const host = req.headers.host ?? "";
-    if (!allowedHosts.includes(host) || (req.headers.origin !== undefined && req.headers.origin !== (publicOrigin??`http://${host}`)) || req.headers["sec-fetch-site"] === "cross-site") {
+    const miniappNavigation = miniappLaunch && (req.method === 'GET' || req.method === 'HEAD') && req.headers['sec-fetch-mode'] === 'navigate';
+    if (!allowedHosts.includes(host) || (req.headers.origin !== undefined && req.headers.origin !== (publicOrigin??`http://${host}`)) || (req.headers["sec-fetch-site"] === "cross-site" && !miniappNavigation)) {
       error(res, 403, "LOCAL_ONLY", "Open the app using its configured address."); return;
     }
     const url = new URL(req.url ?? "/", publicOrigin??`http://${host}`);
     if((req.method==='GET'||req.method==='HEAD')&&url.pathname==='/healthz'){json(res,200,{status:'ok',sendingEnabled:false,releaseCommit});return;}
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/.well-known/farcaster.json') {
+      const origin = publicOrigin ?? `http://${host}`;
+      const association = accountAssociationFromEnv(process.env, new URL(origin).hostname);
+      json(res, 200, miniappManifest(origin, association)); return;
+    }
     if(publicOrigin&&url.pathname==='/'){res.writeHead(302,{Location:'/basket'});res.end();return;}
     if (req.method === 'POST' && ['/api/basket/inventory','/api/basket/quote','/api/basket/plan','/api/basket/simulate','/api/basket/compare'].includes(url.pathname)) {
       if(req.headers['content-type']?.split(';')[0].trim()!=='application/json') {error(res,415,'JSON_REQUIRED','Send JSON.');return;}
@@ -112,12 +121,14 @@ export function createOverviewWebServer(options: { read?: OverviewReader; deadli
     }
     const files: Record<string, [string, string]> = {
       "/": ["index.html", "text/html"], "/app.js": ["app.js", "text/javascript"], "/styles.css": ["styles.css", "text/css"],
-      '/basket':['basket.html','text/html'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/plan-guard.js':['plan-guard.js','text/javascript'],'/comparison-choice.js':['comparison-choice.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css']
+      '/basket':['basket.html','text/html'],'/miniapp':['basket.html','text/html'],'/collect.svg':['collect.svg','image/svg+xml'],'/wallet.js':['wallet.js','text/javascript'],'/plan-guard.js':['plan-guard.js','text/javascript'],'/comparison-choice.js':['comparison-choice.js','text/javascript'],'/basket.js':['basket.js','text/javascript'],'/basket.css':['basket.css','text/css'],
+      '/miniapp.js':['miniapp.js','text/javascript'],'/miniapp-icon.png':['miniapp-icon.png','image/png'],'/miniapp-splash.png':['miniapp-splash.png','image/png'],'/miniapp-share.png':['miniapp-share.png','image/png']
     };
     if ((req.method === "GET" || req.method === "HEAD") && Object.hasOwn(files, url.pathname)) {
       const [filename, mime] = files[url.pathname];
       const content = await readFile(new URL(`../web/${filename}`, import.meta.url));
-      res.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }); res.end(req.method === "HEAD" ? undefined : content); return;
+      const body = url.pathname === '/miniapp' ? Buffer.from(content.toString('utf8').replace('</html>', '<script type="module" src="/miniapp.js"></script></html>')) : content;
+      res.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }); res.end(req.method === "HEAD" ? undefined : body); return;
     }
     error(res, 404, "NOT_FOUND", "Page not found.");
   }
