@@ -74,7 +74,7 @@ async function discoveryJson(url:URL,signal:AbortSignal,rt:BasketRuntime) {
 async function pagedDiscovery(wallet:Address,signal:AbortSignal,rt:BasketRuntime) {
  const items:unknown[]=[];const seen=new Set<string>();
  let next:Record<string,unknown>|null={};
- for(let page=0;next!==null&&page<DISCOVERY_MAX_PAGES;page++){
+ try {for(let page=0;next!==null&&page<DISCOVERY_MAX_PAGES;page++){
   const url=new URL(`https://base.blockscout.com/api/v2/addresses/${wallet}/tokens`);
   url.searchParams.set('type','ERC-20');
   if(Object.keys(next).length>8)throw new DiscoveryFormatError('Too many cursor fields');
@@ -97,12 +97,16 @@ async function pagedDiscovery(wallet:Address,signal:AbortSignal,rt:BasketRuntime
   if(cursorData===null)next=null;
   else if(cursorData&&typeof cursorData==='object'&&!Array.isArray(cursorData))next=cursorData as Record<string,unknown>;
   else throw new DiscoveryFormatError('Invalid next page');
+ }}catch(e){
+  // Valid earlier pages remain useful candidates, never evidence of full coverage.
+  if(items.length&&!(e instanceof DiscoveryFormatError)&&discoveryFailure(e,signal).code!=='INVALID_RESPONSE')return {data:items,failure:discoveryFailure(e,signal)};
+  throw e;
  }
  if(next!==null)throw new DiscoveryFormatError('Inventory pages exceed limit');
- return items;
+ return {data:items,failure:null};
 }
 async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRuntime) {
- const timeout=rt.discoveryTimeoutMs??10_000;
+ const timeout=rt.discoveryTimeoutMs??5_000;
  const primarySignal=AbortSignal.any([signal,AbortSignal.timeout(timeout)]);
  try {
   const url=new URL(`https://base.blockscout.com/api/v2/addresses/${wallet}/token-balances`);
@@ -114,14 +118,14 @@ async function discoverInventory(wallet:Address,signal:AbortSignal,rt:BasketRunt
   const failure=discoveryFailure(e,primarySignal);
   if(!failure.retryable||failure.code==='RATE_LIMITED')return {data:[],failure,source:null};
  }
- // A complete token list can span 20 sequential pages; keep this within the 45s inventory request budget.
- const pageSignal=AbortSignal.any([signal,AbortSignal.timeout(rt.discoveryTimeoutMs??25_000)]);
- try {return {data:await pagedDiscovery(wallet,pageSignal,rt),failure:null,source:'PAGED' as const}}
+ // Reserve the remaining request budget for RPC verification rather than spending it all on discovery.
+ const pageSignal=AbortSignal.any([signal,AbortSignal.timeout(rt.discoveryTimeoutMs??12_000)]);
+ try {const result=await pagedDiscovery(wallet,pageSignal,rt);signal.throwIfAborted();return {...result,source:'PAGED' as const}}
  catch(e){signal.throwIfAborted();return {data:[],failure:discoveryFailure(e,pageSignal),source:null}}
 }
 export const INVENTORY_PAGE_SIZE=16;
 type Candidate={token:Address;price:number|null;suspectedSpam:boolean;spamReason:string|null};
-type InventorySnapshot={inventoryId:string;candidates:Candidate[];expiresAt:number};
+type InventorySnapshot={inventoryId:string;candidates:Candidate[];expiresAt:number;incomplete?:boolean;failure?:DiscoveryFailure|null};
 const INVENTORY_SNAPSHOT_MS=10*60_000;
 const inventorySnapshots=new Map<string,InventorySnapshot>();
 function recentSnapshot(store:Map<string,InventorySnapshot>|undefined,wallet:Address) {
@@ -162,27 +166,29 @@ export function inventoryCandidates(data:unknown,manual:Address[]=[]) {
 }
 export async function readBasketInventory(raw:unknown, signal:AbortSignal, rt=runtime(signal)) {
  const input=inventoryInput.parse(raw);const warnings=['All valid nonzero ERC-20 entries returned by the indexer are candidates, including entries without prices. This is source coverage, not proof of every asset on Base.','Balances are verified in pages of 16. Pages may have different block times; selected balances are refreshed before quoting.','Estimated values use an unverified indexer price and an on-chain balance; they are not sale quotes. Suspicious metadata flags are only heuristics.'];
- let data:unknown=[];let discoveryStatus:'INDEXER_CANDIDATES'|'CACHED_CANDIDATES'|'MANUAL'|'UNAVAILABLE'=input.tokens?.length?'MANUAL':'INDEXER_CANDIDATES';
+ let data:unknown=[];let discoveryStatus:'INDEXER_CANDIDATES'|'PARTIAL_CANDIDATES'|'CACHED_CANDIDATES'|'MANUAL'|'UNAVAILABLE'=input.tokens?.length?'MANUAL':'INDEXER_CANDIDATES';
  let discoveryFailure:DiscoveryFailure|null=null;
  const snapshot=input.tokens?.length?undefined:recentSnapshot(rt.inventorySnapshots,input.wallet);
- let candidates:Candidate[];
+ let candidates:Candidate[];let freshCandidates=false;
  if(!input.tokens?.length){
   if(snapshot&&(input.offset>0||!input.refreshDiscovery)){
    if(input.offset>0&&input.inventoryId!==snapshot.inventoryId)throw new InventoryChangedError('Inventory changed; reload from the first page');
-   candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('Using a recent token list held briefly in server memory. Balances are checked again on Base RPC.');
+   candidates=snapshot.candidates;discoveryStatus=snapshot.incomplete?'PARTIAL_CANDIDATES':'CACHED_CANDIDATES';discoveryFailure=snapshot.failure??null;warnings.push('Using a recent token list held briefly in server memory. Balances are checked again on Base RPC.');
   }else{
    const discovery=await discoverInventory(input.wallet,signal,rt);data=discovery.data;discoveryFailure=discovery.failure;
-   if(discovery.source==='PAGED')warnings.push('The all-balances indexer request failed; token candidates were recovered through its complete paginated ERC-20 list.');
+   if(discovery.source==='PAGED')warnings.push(discoveryFailure?'Some token candidates were recovered from valid indexer pages. Discovery is incomplete.':'The all-balances indexer request failed; token candidates were recovered through its complete paginated ERC-20 list.');
    if(discoveryFailure){
-    if(snapshot&&discoveryFailure.code!=='INVALID_RESPONSE'){
-     candidates=snapshot.candidates;discoveryStatus='CACHED_CANDIDATES';warnings.push('The indexer could not refresh the token list. Using a recent list; balances are checked again on Base RPC.');
+    if(Array.isArray(data)&&data.length){
+     candidates=inventoryCandidates(data);discoveryStatus='PARTIAL_CANDIDATES';freshCandidates=true;
+    }else if(snapshot&&discoveryFailure.code!=='INVALID_RESPONSE'){
+     candidates=snapshot.candidates;discoveryStatus=snapshot.incomplete?'PARTIAL_CANDIDATES':'CACHED_CANDIDATES';warnings.push('The indexer could not refresh the token list. Using a recent list; balances are checked again on Base RPC.');
     }else{discoveryStatus='UNAVAILABLE';warnings.push('Discovery is unavailable. Only core tokens are shown; retry discovery or add token addresses.');candidates=inventoryCandidates([])}
-   }else candidates=inventoryCandidates(data);
+   }else {candidates=inventoryCandidates(data);freshCandidates=true;}
   }
  }else candidates=inventoryCandidates([],input.tokens);
- const inventoryId=createHash('sha256').update(JSON.stringify({wallet:input.wallet.toLowerCase(),mode:discoveryStatus==='CACHED_CANDIDATES'?'INDEXER_CANDIDATES':discoveryStatus,tokens:candidates.map(x=>x.token.toLowerCase())})).digest('hex');
+ const inventoryId=createHash('sha256').update(JSON.stringify({wallet:input.wallet.toLowerCase(),mode:['CACHED_CANDIDATES','PARTIAL_CANDIDATES'].includes(discoveryStatus)?'INDEXER_CANDIDATES':discoveryStatus,tokens:candidates.map(x=>x.token.toLowerCase())})).digest('hex');
  if(input.offset>0&&(input.inventoryId!==inventoryId||input.offset>=candidates.length))throw new InventoryChangedError('Inventory changed; reload from the first page');
- if(discoveryStatus==='INDEXER_CANDIDATES')rememberSnapshot(rt.inventorySnapshots,input.wallet,{inventoryId,candidates,expiresAt:Date.now()+INVENTORY_SNAPSHOT_MS});
+ if(freshCandidates)rememberSnapshot(rt.inventorySnapshots,input.wallet,{inventoryId,candidates,expiresAt:Date.now()+INVENTORY_SNAPSHOT_MS,incomplete:discoveryStatus==='PARTIAL_CANDIDATES',failure:discoveryFailure});
  const page=candidates.slice(input.offset,input.offset+INVENTORY_PAGE_SIZE);
  const block=await anchor(rt);const observed=await balances(input.wallet,page.map(x=>x.token),block.number,signal,rt);await checkBlock(rt,block);
  const rows=observed.map((row,i)=>{const candidate=page[i];const estimate=row.amountFormatted!==null&&candidate.price!==null?Number(row.amountFormatted)*candidate.price:NaN;const impersonation=impersonatesCoreToken(row.token,row.symbol);const suspicious=candidate.suspectedSpam||suspiciousMetadata(row.symbol)||impersonation;const riskLevel=suspicious?'BLOCKED_METADATA':row.token.toLowerCase()===USDC.toLowerCase()||row.token.toLowerCase()===WETH.toLowerCase()?'KNOWN_CONTRACT':'UNVERIFIED';return {...row,approximateUsd:Number.isFinite(estimate)&&estimate>=0?estimate:null,suspectedSpam:suspicious,riskLevel,spamReason:suspicious?candidate.spamReason??(impersonation?'This contract uses the symbol of a different known Base token. Check its contract address.':'Token symbol contains promotional instructions; review separately.'):null,blockNumber:block.number.toString()};});
