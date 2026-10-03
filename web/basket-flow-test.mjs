@@ -33,7 +33,7 @@ const amount=()=>result.all().find(x=>x.attributes['aria-label']==='Amount for A
 const submit=()=>ids.get('f').onsubmit({preventDefault(){}});
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 ids.get('w').value=walletA;queue.push(page(walletA,[row()], 'UNAVAILABLE'));submit();await settle();
-assert.match(result.textContent,/rate limited/);select('AERO',token);amount().value='1';amount().oninput();
+assert.match(result.textContent,/rate limited/);assert.match(result.textContent,/Token discovery unavailable/);assert.doesNotMatch(result.textContent,/All discovered candidates have been checked/);select('AERO',token);assert.equal(find('button','Estimate after fees').disabled,false,'a single selected token can get a read-only after-fee estimate');assert.equal(find('button','Compare what to include').disabled,true,'comparison still requires two inputs');amount().value='1';amount().oninput();
 queue.push(page(walletA,[row(),row(token2,4)]));await find('button','Retry discovery').onclick();
 assert.match(result.textContent,/1 token selected/);assert.equal(amount().value,'1');
 find('button','Under $1 (1)').onclick();assert.match(result.textContent,/unknown value and remain visible/);assert.equal(result.all().filter(x=>x.attributes['aria-label']?.startsWith('Select ')).length,1);
@@ -44,7 +44,8 @@ queue.push(quoted('1000000'));await find('button','Preview').onclick();assert.ma
 queue.push(quoted('2000000'));await find('button','Preview').onclick();assert.match(result.querySelector('.quote').textContent,/1 USDC/);
 // Pagination preserves the current selection and checks the next offset.
 queue.push(page(walletA,[row()], 'INDEXER_CANDIDATES',0,1));submit();await settle();select('AERO',token);
-queue.push(page(walletA,[row(token2,4)],'INDEXER_CANDIDATES',1,null));await find('button','Load more').onclick();assert.equal(requests.at(-1).body.offset,1);assert.match(result.textContent,/1 token selected/);
+assert.match(result.textContent,/1 of 3 candidate contracts checked/);assert.match(result.textContent,/Balance observed · route and costs unknown/);
+queue.push(page(walletA,[row(token2,4)],'INDEXER_CANDIDATES',1,null));await find('button','Check next 2 candidates').onclick();assert.equal(requests.at(-1).body.offset,1);assert.match(result.textContent,/1 token selected/);
 // Stale response from A cannot overwrite B after the address input changes.
 let resolveA;queue.push(()=>new Promise(resolve=>{resolveA=resolve}));submit();
 ids.get('w').value=walletB;ids.get('w').oninput();queue.push(page(walletB,[row(token2,0.5)]));submit();await settle();
