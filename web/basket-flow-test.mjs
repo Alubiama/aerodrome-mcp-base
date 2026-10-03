@@ -12,11 +12,12 @@ class Element {
  remove(){if(this.parent)this.parent.children=this.parent.children.filter(x=>x!==this);this.parent=null;}
  replaceChildren(...nodes){this.children=[];this._text='';this.append(...nodes);}
  setAttribute(key,value){this.attributes[key]=value;}
+ scrollIntoView(){this.scrollCount=(this.scrollCount||0)+1;}
  querySelector(selector){return this.all().find(x=>selector.startsWith('.')?x.className===selector.slice(1):x.tag===selector)||null;}
  all(){return this.children.flatMap(x=>[x,...x.all()]);}
  dispatchEvent(e){this['on'+e.type]?.(e);}
 }
-const ids=new Map(['w','m','r','e','mc','saved-address-list','saved-address-status','save-address','wallet-provider','connect','disconnect','wallet-status','f'].map(id=>[id,new Element()]));
+const ids=new Map(['w','m','r','e','mc','view-wallet','wallet-load-status','saved-address-list','saved-address-status','save-address','wallet-provider','connect','disconnect','wallet-status','f'].map(id=>[id,new Element()]));
 const walletA='0x0000000000000000000000000000000000000001',walletB='0x0000000000000000000000000000000000000002';
 const token='0x0000000000000000000000000000000000000010';
 const token2='0x0000000000000000000000000000000000000011';
@@ -32,7 +33,10 @@ const select=(name,address)=>{let x=result.all().find(x=>x.attributes['aria-labe
 const amount=()=>result.all().find(x=>x.attributes['aria-label']==='Amount for AERO');
 const submit=()=>ids.get('f').onsubmit({preventDefault(){}});
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
-ids.get('w').value=walletA;queue.push(page(walletA,[row()], 'UNAVAILABLE'));submit();await settle();
+ids.get('w').value=walletA;queue.push(page(walletA,[row()], 'UNAVAILABLE'));submit();
+assert.equal(ids.get('view-wallet').disabled,true);assert.equal(ids.get('view-wallet').textContent,'Loading…');assert.match(ids.get('wallet-load-status').textContent,/Checking Base balances/);
+await settle();
+assert.equal(ids.get('view-wallet').disabled,false);assert.match(ids.get('wallet-load-status').textContent,/Discovery is incomplete/);assert.equal(result.scrollCount,1);
 assert.match(result.textContent,/rate limited/);assert.match(result.textContent,/Token discovery unavailable/);assert.doesNotMatch(result.textContent,/All discovered candidates have been checked/);select('AERO',token);assert.equal(find('button','Estimate after fees').disabled,false,'a single selected token can get a read-only after-fee estimate');assert.equal(find('button','Compare what to include').disabled,true,'comparison still requires two inputs');amount().value='1';amount().oninput();
 queue.push(page(walletA,[row(),row(token2,4)]));await find('button','Retry discovery').onclick();
 assert.match(result.textContent,/1 token selected/);assert.equal(amount().value,'1');
